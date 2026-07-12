@@ -9,6 +9,7 @@ from cryosim.pid_recommender import (
     TankSpec,
     draw_pid,
     recommend_feed_system,
+    select_optimal_architecture,
 )
 
 
@@ -92,3 +93,36 @@ def test_draw_pid_creates_file(tmp_path):
     out = draw_pid(rec, str(tmp_path / "pid.svg"))
     assert os.path.exists(out)
     assert os.path.getsize(out) > 5000
+
+
+@pytest.mark.parametrize("scheme",
+                         ["regulated", "blowdown", "autogenous", "pump"])
+def test_draw_pid_all_schemes(tmp_path, scheme):
+    rec = recommend_feed_system(FeedSystemConfig(pressurization=scheme))
+    out = draw_pid(rec, str(tmp_path / f"pid_{scheme}.png"))
+    assert os.path.getsize(out) > 20000
+
+
+def test_optimal_architecture_methane_needs_pump():
+    """CH4 coolant at Pc=30 bar needs ~60+ bar channels > 0.85*P_crit ->
+    pump-fed, with the reasoning attached."""
+    cfg, why = select_optimal_architecture(
+        oxidizer="LOX", fuel="LCH4", chamber_pressure=30e5, burn_time=20.0)
+    assert cfg.pressurization == "pump"
+    assert any("critical pressure" in r for r in why)
+    assert cfg.tanks[1].is_coolant and cfg.tanks[1].cryogenic
+
+
+def test_optimal_architecture_ethanol_regulated():
+    """Ethanol coolant (P_crit ~63 bar) at modest Pc -> regulated."""
+    cfg, why = select_optimal_architecture(
+        oxidizer="LOX", fuel="Ethanol", chamber_pressure=15e5, burn_time=20.0)
+    assert cfg.pressurization == "regulated"
+    assert not cfg.tanks[1].cryogenic     # ethanol tank is storable
+    assert cfg.tanks[0].cryogenic         # LOX tank is cryogenic
+
+
+def test_optimal_architecture_short_low_pc_blowdown():
+    cfg, why = select_optimal_architecture(
+        oxidizer="LOX", fuel="Ethanol", chamber_pressure=8e5, burn_time=5.0)
+    assert cfg.pressurization == "blowdown"

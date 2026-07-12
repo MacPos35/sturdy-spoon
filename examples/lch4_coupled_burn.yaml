@@ -59,7 +59,7 @@ coupled:
   c_mix: 5.0              # slosh->thermal mixing gain (parametric, unvalidated)
 
 feed_system:              # for `cryosim pid`
-  pressurization: pump
+  pressurization: optimal   # let the rule set pick (here: pump) — or regulated|blowdown|autogenous|pump
   regen_cooled: true
   tanks:
     - {name: LOX,  cryogenic: true, oxidizer: true}

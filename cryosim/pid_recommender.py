@@ -207,65 +207,100 @@ def recommend_feed_system(cfg: FeedSystemConfig) -> FeedSystemRecommendation:
 
 
 # --------------------------------------------------------------------------
-# Schematic drawing
+# Optimal architecture selection
 # --------------------------------------------------------------------------
-_SUBSYSTEM_COLORS = {
-    "pressurant": "#7aa6c2",
-    "engine": "#c27a7a",
-}
+def select_optimal_architecture(
+    oxidizer: str = "LOX",
+    fuel: str = "LCH4",
+    coolant_is_fuel: bool = True,
+    chamber_pressure: float = 30e5,
+    burn_time: float = 20.0,
+    injector_dp_fraction: float = 0.2,
+    jacket_dp_estimate: float = 25e5,
+) -> tuple[FeedSystemConfig, list[str]]:
+    """Pick the most sensible feed architecture for the given system.
+
+    Rule set (each choice is returned with its rationale):
+
+    1. Required regen channel feed pressure ~ Pc*(1+injector stiffness) +
+       jacket drop. If that exceeds ~85% of the coolant's critical pressure,
+       single-phase (supercritical) cooling is impossible pressure-fed with
+       a saturated-ullage cryogenic tank -> **pump-fed** (low-pressure tank,
+       pump raises only the coolant line).
+    2. Otherwise, short burns at modest Pc tolerate **blowdown** (simplest,
+       but decaying thrust); longer burns get **regulated** pressure-fed.
+    3. Autogenous pressurization is suggested (as a note) for a cryogenic
+       coolant tank whenever the regen outlet provides warm vapor anyway.
+
+    This is deliberately transparent design logic, not an optimizer over a
+    cost function — every branch is inspectable and cited in the returned
+    rationale.
+    """
+    from .fluids import Fluid
+
+    rationale: list[str] = []
+    coolant_name = fuel if coolant_is_fuel else oxidizer
+    p_req = chamber_pressure * (1.0 + injector_dp_fraction) + jacket_dp_estimate
+    try:
+        p_crit = Fluid(coolant_name).P_crit
+    except Exception:
+        p_crit = float("inf")
+
+    if p_req > 0.85 * p_crit:
+        scheme = "pump"
+        rationale.append(
+            f"required coolant feed pressure ~{p_req/1e5:.0f} bar exceeds "
+            f"85% of {coolant_name}'s critical pressure "
+            f"({p_crit/1e5:.0f} bar): a saturated-ullage cryo tank cannot be "
+            "pressure-fed that high, and subcritical heated coolant would "
+            "boil in the jacket -> electric pump on the coolant line, tank "
+            "held at a low autogenous pad (2-4 bar)"
+        )
+    elif burn_time <= 8.0 and chamber_pressure <= 15e5:
+        scheme = "blowdown"
+        rationale.append(
+            f"short burn ({burn_time:.0f} s) at modest Pc "
+            f"({chamber_pressure/1e5:.0f} bar): blowdown is the simplest "
+            "reliable option; verify end-of-burn injector margin"
+        )
+    else:
+        scheme = "regulated"
+        rationale.append(
+            f"required feed pressure {p_req/1e5:.0f} bar is well below the "
+            f"coolant critical pressure ({p_crit/1e5:.0f} bar): regulated "
+            "pressure-fed keeps mdot and Pc constant over the "
+            f"{burn_time:.0f} s burn with minimum moving parts"
+        )
+
+    def _cryo(name: str) -> bool:
+        try:
+            f = Fluid(name)
+            return f.T_sat(101325.0) < 200.0
+        except Exception:
+            return False
+
+    tanks = [
+        TankSpec(oxidizer, cryogenic=_cryo(oxidizer), oxidizer=True,
+                 is_coolant=not coolant_is_fuel),
+        TankSpec(fuel, cryogenic=_cryo(fuel), is_coolant=coolant_is_fuel),
+    ]
+    coolant_tank = tanks[1] if coolant_is_fuel else tanks[0]
+    if coolant_tank.cryogenic and scheme == "pump":
+        rationale.append(
+            "autogenous tank pad is a natural upgrade here: the regen outlet "
+            "already provides warm vapor of the same species (see the "
+            "'autogenous' scheme for that variant)"
+        )
+    return FeedSystemConfig(pressurization=scheme, tanks=tanks,
+                            regen_cooled=True), rationale
 
 
 def draw_pid(rec: FeedSystemRecommendation, path: str) -> str:
-    """Draw a simplified feed-system schematic and save it (SVG/PNG by
-    file extension). One column per subsystem, flow top -> bottom."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import FancyBboxPatch
+    """Render the recommendation as an ISA-5.1-flavored schematic with drawn
+    valve/instrument symbols, routed lines, legend, and title block.
 
-    groups = rec.by_subsystem()
-    order = ["pressurant"] + [t.name for t in rec.config.tanks] + ["engine"]
-    cols = [g for g in order if g in groups]
+    Implementation lives in :mod:`cryosim.pid_drawing`.
+    """
+    from .pid_drawing import draw_pid as _draw
 
-    n_rows = max(len(groups[c]) for c in cols)
-    fig_h = 1.2 + 0.62 * n_rows
-    fig, ax = plt.subplots(figsize=(3.4 * len(cols), fig_h))
-    ax.set_xlim(0, len(cols))
-    ax.set_ylim(-0.5, n_rows + 1.2)
-    ax.axis("off")
-
-    for j, colname in enumerate(cols):
-        color = _SUBSYSTEM_COLORS.get(colname, "#8fbc8f")
-        ax.text(j + 0.5, n_rows + 0.8, colname, ha="center", va="center",
-                fontsize=12, fontweight="bold")
-        comps = groups[colname]
-        for i, c in enumerate(comps):
-            y = n_rows - i
-            ax.add_patch(FancyBboxPatch(
-                (j + 0.08, y - 0.22), 0.84, 0.44,
-                boxstyle="round,pad=0.02", linewidth=1.2,
-                edgecolor=color, facecolor="white",
-            ))
-            ax.text(j + 0.5, y, f"{c.tag}  {c.name}", ha="center",
-                    va="center", fontsize=7.2, wrap=True)
-            if i < len(comps) - 1:  # flow line to next component
-                ax.plot([j + 0.5, j + 0.5], [y - 0.24, y - 0.78],
-                        color=color, lw=1.2)
-        # connect column to the engine column baseline
-        if colname != "engine":
-            y_last = n_rows - len(comps) + 1
-            ax.plot([j + 0.5, j + 0.5], [y_last - 0.24, -0.3], color=color,
-                    lw=1.2, linestyle=":")
-    ax.plot([0.5, len(cols) - 0.5], [-0.3, -0.3], color="#555", lw=1.5,
-            linestyle=":")
-    ax.text(len(cols) / 2, -0.45,
-            "simplified schematic — checklist aid, not a safety-reviewed P&ID",
-            ha="center", fontsize=8, style="italic", color="#555")
-    fig.suptitle(
-        f"Recommended feed system ({rec.config.pressurization}-fed)",
-        fontsize=13,
-    )
-    fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight")
-    plt.close(fig)
-    return path
+    return _draw(rec, path)

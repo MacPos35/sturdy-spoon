@@ -18,8 +18,17 @@ couples, over a user-specified burn/flight profile:
    pressure; the propellant drawn from the tank (at its current outlet state)
    **is** the regen coolant; the heated regen outlet state is tracked as the
    **injector inlet condition** through the burn;
-5. A **rule-based feed-system P&ID recommender** for the selected
-   configuration (regulated / blowdown / autogenous / pump-fed).
+5. A **rule-based feed-system P&ID recommender**: pass a scheme (regulated /
+   blowdown / autogenous / pump-fed) or `pressurization: optimal` to let a
+   transparent rule set pick the architecture from the fluids and chamber
+   pressure (e.g., methane coolant at Pc ≥ ~20 bar needs supercritical
+   channel pressure above what a saturated-ullage tank can supply →
+   pump-fed, with the reasoning printed). The output is an ISA-5.1-flavored
+   schematic with drawn valve/instrument symbols, routed process and
+   instrument lines (vent + relief + burst-disc manifolds, pressurant
+   header with per-tank check valves, feed trains, regen coolant loop to
+   the injector), a described symbol legend, fluid-colored line key, and a
+   title block — plus the component list with one-line rationales.
 
 **Design choice, stated up front: there is no CFD anywhere in this tool —
 by design.** Every sub-model is the fast, analytical/empirical reduced-order
@@ -169,7 +178,10 @@ numbers.
   oxidizer tank represented only through the mixture ratio (model the ox
   tank by running a second instance with `coolant_is_fuel: false`).
 * **P&ID recommender**: a checklist aid encoding common student-team
-  practice — explicitly **not** a safety-reviewed P&ID.
+  practice; the schematic uses simplified ISA-5.1-style symbology and the
+  architecture selector is transparent rules, not an optimizer over a cost
+  function — explicitly **not** a safety-reviewed P&ID (also printed in
+  the drawing's title block).
 
 ## A finding worth knowing (from the coupled demo)
 

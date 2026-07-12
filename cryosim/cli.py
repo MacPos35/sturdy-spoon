@@ -223,12 +223,32 @@ def run_pid(cfg: dict, outdir: str) -> None:
     fs = cfg.get("feed_system")
     if fs is None:
         raise SystemExit("config has no feed_system section")
-    fcfg = FeedSystemConfig(
-        pressurization=fs.get("pressurization", "regulated"),
-        tanks=[TankSpec(**t) for t in fs.get("tanks", [])] or
-              FeedSystemConfig().tanks,
-        regen_cooled=bool(fs.get("regen_cooled", True)),
-    )
+    if fs.get("pressurization") == "optimal":
+        # let the rule set pick the architecture from the sim config
+        from .pid_recommender import select_optimal_architecture
+
+        burn = cfg.get("burn", {})
+        pc_spec = burn.get("pc", 20e5)
+        pc = float(pc_spec) if isinstance(pc_spec, (int, float)) else \
+            max(float(v) for _, v in pc_spec)
+        fcfg, rationale = select_optimal_architecture(
+            oxidizer=fs.get("oxidizer", "LOX"),
+            fuel=cfg.get("fluid", "LCH4"),
+            coolant_is_fuel=bool(cfg.get("engine", {}).get("coolant_is_fuel",
+                                                           True)),
+            chamber_pressure=pc,
+            burn_time=float(burn.get("t_end", 20.0)),
+        )
+        print("selected architecture:", fcfg.pressurization)
+        for r in rationale:
+            print("  -", r)
+    else:
+        fcfg = FeedSystemConfig(
+            pressurization=fs.get("pressurization", "regulated"),
+            tanks=[TankSpec(**t) for t in fs.get("tanks", [])] or
+                  FeedSystemConfig().tanks,
+            regen_cooled=bool(fs.get("regen_cooled", True)),
+        )
     rec = recommend_feed_system(fcfg)
     txt_path = os.path.join(outdir, "feed_system.txt")
     with open(txt_path, "w") as fh:

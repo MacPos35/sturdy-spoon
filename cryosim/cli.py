@@ -1,0 +1,269 @@
+"""Command-line interface.
+
+Usage::
+
+    cryosim run examples/lch4_coupled_burn.yaml -o output/
+    cryosim run examples/lox_tank_selfpress.yaml -o output/
+    cryosim pid examples/lch4_coupled_burn.yaml -o output/
+
+``run`` executes either a coupled burn simulation (``mode: coupled``) or a
+tank-only thermal/slosh simulation (``mode: tank_only``) from a YAML config
+and writes CSV histories + PNG plots. ``pid`` renders the rule-based
+feed-system recommendation for the config's ``feed_system`` section.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+
+import numpy as np
+import yaml
+
+from .chamber_geometry import ChamberContour, CoolingChannels
+from .combustion import CombustionGas, gas_preset
+from .coupling import BurnProfile, CoupledConfig, CoupledSimulator, Engine
+from .fluids import Fluid
+from .pid_recommender import (
+    FeedSystemConfig,
+    TankSpec,
+    draw_pid,
+    recommend_feed_system,
+)
+from .slosh_model import SloshModel
+from .tank_geometry import TankGeometry
+from .thermal_model import G0, TankThermalConfig, TankThermalModel
+from . import plots
+
+
+def _table_or_scalar(spec):
+    """YAML value -> callable(t). Accepts a scalar or [[t, v], ...] table."""
+    if isinstance(spec, (int, float)):
+        v = float(spec)
+        return lambda t: v
+    tab = np.asarray(spec, dtype=float)
+    return lambda t: float(np.interp(t, tab[:, 0], tab[:, 1]))
+
+
+def build_tank(cfg: dict) -> tuple[Fluid, TankGeometry, TankThermalModel]:
+    fluid = Fluid(cfg.get("fluid", "LOX"))
+    tk = cfg["tank"]
+    geom = TankGeometry(
+        radius=float(tk["radius"]),
+        cyl_length=float(tk["cyl_length"]),
+        bottom_dome=tk.get("bottom_dome", "elliptical"),
+        top_dome=tk.get("top_dome", "elliptical"),
+        dome_aspect=float(tk.get("dome_aspect", 2.0)),
+    )
+    tcfg = TankThermalConfig()
+    for key, val in tk.get("thermal", {}).items():
+        if not hasattr(tcfg, key):
+            raise KeyError(f"unknown tank.thermal option {key!r}")
+        setattr(tcfg, key, float(val) if val is not None else None)
+    model = TankThermalModel(
+        fluid, geom,
+        wall_mass=float(tk["wall_mass"]),
+        heat_flux=float(tk.get("heat_flux", 0.0)),
+        config=tcfg,
+    )
+    return fluid, geom, model
+
+
+def build_engine(cfg: dict) -> Engine:
+    en = cfg["engine"]
+    contour = ChamberContour(
+        throat_radius=float(en["throat_radius"]),
+        contraction_ratio=float(en.get("contraction_ratio", 8.0)),
+        expansion_ratio=float(en.get("expansion_ratio", 4.0)),
+        chamber_length=float(en.get("chamber_length", 0.15)),
+        n_points=int(en.get("n_points", 100)),
+    )
+    ch = en["channels"]
+    channels = CoolingChannels(
+        n_channels=int(ch["n_channels"]),
+        channel_width=float(ch["channel_width"]),
+        channel_height=float(ch["channel_height"]),
+        t_wall=float(ch["t_wall"]),
+        k_wall=float(ch.get("k_wall", 350.0)),
+        helix_angle_deg=float(ch.get("helix_angle_deg", 0.0)),
+        roughness=float(ch.get("roughness", 3.0e-6)),
+    )
+    gas_spec = en.get("gas", "lox/ch4")
+    if isinstance(gas_spec, str):
+        gas = gas_preset(gas_spec)
+    else:
+        gas = CombustionGas(
+            T_c=float(gas_spec["T_c"]),
+            gamma=float(gas_spec["gamma"]),
+            molar_mass=float(gas_spec["molar_mass"]),
+            mu=float(gas_spec["mu"]) if "mu" in gas_spec else None,
+            Pr=float(gas_spec["Pr"]) if "Pr" in gas_spec else None,
+        )
+    return Engine(
+        contour=contour, channels=channels, gas=gas,
+        mixture_ratio=float(en.get("mixture_ratio", 3.4)),
+        coolant_is_fuel=bool(en.get("coolant_is_fuel", True)),
+        injector_dp_fraction=float(en.get("injector_dp_fraction", 0.2)),
+    )
+
+
+def run_coupled(cfg: dict, outdir: str) -> None:
+    fluid, geom, tmodel = build_tank(cfg)
+    engine = build_engine(cfg)
+    slosh = SloshModel(fluid, geom,
+                       zeta_override=cfg.get("slosh", {}).get("zeta_override"))
+
+    cc = cfg.get("coupled", {})
+    ccfg = CoupledConfig(
+        dt=float(cc.get("dt", 0.25)),
+        regen_interval=float(cc.get("regen_interval", 1.0)),
+        c_mix=float(cc.get("c_mix", 5.0)),
+        feed_dp=float(cc.get("feed_dp", 0.5e5)),
+        pump_dp=float(cc.get("pump_dp", 0.0)),
+        fill_cutoff=float(cc.get("fill_cutoff", 0.03)),
+    )
+
+    burn = cfg["burn"]
+    lat = burn.get("lateral_accel", {})
+    amp = float(lat.get("amplitude", 0.0))
+    freq = float(lat.get("frequency", 1.0))
+    profile = BurnProfile(
+        pc_of_t=_table_or_scalar(burn["pc"]),
+        axial_accel_of_t=(lambda f=_table_or_scalar(
+            burn.get("axial_accel_g", 1.0)): lambda t: f(t) * G0)(),
+        lateral_accel_of_t=lambda t: amp * np.sin(2 * np.pi * freq * t),
+        t_end=float(burn["t_end"]),
+    )
+
+    init = cfg["initial"]
+    sim = CoupledSimulator(fluid, geom, tmodel, slosh, engine, ccfg)
+    print(f"running coupled burn: {profile.t_end:.1f} s ...")
+    hist = sim.run(
+        profile,
+        P0=float(init["pressure"]),
+        fill0=float(init["fill_fraction"]),
+        T_liquid0=float(init["T_liquid"]) if init.get("T_liquid") else None,
+    )
+    a = hist.asarrays()
+
+    plots.write_history_csv(a, os.path.join(outdir, "coupled_history.csv"))
+    plots.plot_coupled_tank(a, os.path.join(outdir, "tank.png"))
+    plots.plot_coupled_slosh(a, os.path.join(outdir, "slosh.png"))
+    plots.plot_coupled_regen(a, os.path.join(outdir, "regen.png"))
+    if hist.regen_snapshots:
+        t_mid, res_mid = hist.regen_snapshots[len(hist.regen_snapshots) // 2]
+        plots.plot_regen_distribution(
+            res_mid, engine.contour.x_throat,
+            os.path.join(outdir, "regen_axial.png"),
+            title=f"Regen cooling — axial distributions at t = {t_mid:.1f} s",
+        )
+        if any(r.boiling_detected for _, r in hist.regen_snapshots):
+            print("WARNING: two-phase coolant detected in the jacket — "
+                  "single-phase correlations invalid there (no boiling model)")
+    print(f"done: {len(a['t'])} steps -> {outdir}/")
+    print(f"  fill {a['fill_fraction'][0]*100:.0f}% -> {a['fill_fraction'][-1]*100:.0f}%, "
+          f"ullage P {a['P_ullage'][-1]/1e5:.2f} bar")
+    ok = ~np.isnan(a["coolant_outlet_T"])
+    if ok.any():
+        print(f"  injector inlet T {np.nanmin(a['coolant_outlet_T']):.0f}-"
+              f"{np.nanmax(a['coolant_outlet_T']):.0f} K, "
+              f"peak wall {np.nanmax(a['peak_wall_T']):.0f} K, "
+              f"min injector margin {np.nanmin(a['injector_margin'])/1e5:.1f} bar")
+
+
+def run_tank_only(cfg: dict, outdir: str) -> None:
+    fluid, geom, tmodel = build_tank(cfg)
+    slosh = SloshModel(fluid, geom,
+                       zeta_override=cfg.get("slosh", {}).get("zeta_override"))
+    sim = cfg.get("sim", {})
+    t_end = float(sim.get("t_end", 3600.0))
+    accel = float(sim.get("accel_g", 1.0)) * G0
+    mdot = _table_or_scalar(sim.get("mdot_out", 0.0))
+
+    init = cfg["initial"]
+    y0 = tmodel.initial_state(
+        float(init["pressure"]), float(init["fill_fraction"]),
+        T_liquid=float(init["T_liquid"]) if init.get("T_liquid") else None,
+    )
+    print(f"running tank-only simulation: {t_end:.0f} s ...")
+    hist = tmodel.simulate((0.0, t_end), y0, mdot_out=mdot, accel=accel,
+                           n_out=int(sim.get("n_out", 150)),
+                           rtol=float(sim.get("rtol", 1e-5)))
+    plots.plot_tank_history(
+        hist, os.path.join(outdir, "tank.png"),
+        title=f"{fluid.name} tank self-pressurization",
+    )
+    a = {k: getattr(hist, k) for k in
+         ("t", "P", "T_ullage", "T_surface", "T_bulk", "m_liquid", "m_ullage",
+          "fill_fraction", "boiloff_rate")}
+    plots.write_history_csv(a, os.path.join(outdir, "tank_history.csv"))
+
+    # slosh parameter sweep over the run (quasi-static)
+    import matplotlib.pyplot as plt
+    fr, mf, zt = [], [], []
+    for i in range(len(hist.t)):
+        V = hist.m_liquid[i] / fluid.sat_liquid(hist.P[i]).rho
+        p = slosh.params_at(V, hist.P[i], accel)
+        fr.append(p.first.frequency); mf.append(p.slosh_mass_fraction)
+        zt.append(p.zeta_viscous)
+    fig, ax = plt.subplots(1, 3, figsize=(11, 3.2))
+    ax[0].plot(hist.t / 60, fr, color=plots.C_BLUE)
+    ax[0].set(xlabel="time [min]", ylabel="1st mode frequency [Hz]")
+    ax[1].plot(hist.t / 60, np.array(mf) * 100, color=plots.C_ORANGE)
+    ax[1].set(xlabel="time [min]", ylabel="slosh mass fraction [%]")
+    ax[2].plot(hist.t / 60, np.array(zt) * 100, color=plots.C_GREEN)
+    ax[2].set(xlabel="time [min]", ylabel="viscous damping ratio [%]")
+    fig.suptitle("Slosh analog parameters (quasi-static)")
+    fig.savefig(os.path.join(outdir, "slosh_params.png"), dpi=150)
+    plt.close(fig)
+    print(f"done -> {outdir}/  (P: {hist.P[0]/1e5:.2f} -> {hist.P[-1]/1e5:.2f} bar)")
+
+
+def run_pid(cfg: dict, outdir: str) -> None:
+    fs = cfg.get("feed_system")
+    if fs is None:
+        raise SystemExit("config has no feed_system section")
+    fcfg = FeedSystemConfig(
+        pressurization=fs.get("pressurization", "regulated"),
+        tanks=[TankSpec(**t) for t in fs.get("tanks", [])] or
+              FeedSystemConfig().tanks,
+        regen_cooled=bool(fs.get("regen_cooled", True)),
+    )
+    rec = recommend_feed_system(fcfg)
+    txt_path = os.path.join(outdir, "feed_system.txt")
+    with open(txt_path, "w") as fh:
+        fh.write(rec.as_text() + "\n")
+    draw_pid(rec, os.path.join(outdir, "feed_system_pid.svg"))
+    print(rec.as_text())
+    print(f"\nwritten: {txt_path}, {outdir}/feed_system_pid.svg")
+
+
+def main(argv=None) -> None:
+    ap = argparse.ArgumentParser(
+        prog="cryosim",
+        description="Coupled slosh + thermal + regen-cooling simulator "
+                    "for small cryogenic bi-propellant rockets",
+    )
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name, help_ in (("run", "run a simulation from a YAML config"),
+                        ("pid", "feed-system P&ID recommendation")):
+        p = sub.add_parser(name, help=help_)
+        p.add_argument("config", help="YAML configuration file")
+        p.add_argument("-o", "--outdir", default="output",
+                       help="output directory (default: output/)")
+    args = ap.parse_args(argv)
+
+    with open(args.config) as fh:
+        cfg = yaml.safe_load(fh)
+    os.makedirs(args.outdir, exist_ok=True)
+
+    if args.cmd == "pid":
+        run_pid(cfg, args.outdir)
+    elif cfg.get("mode", "coupled") == "tank_only":
+        run_tank_only(cfg, args.outdir)
+    else:
+        run_coupled(cfg, args.outdir)
+
+
+if __name__ == "__main__":
+    main()

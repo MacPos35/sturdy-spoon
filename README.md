@@ -1,0 +1,218 @@
+# cryosim — coupled slosh + thermal + regen-cooling simulator
+
+A reduced-order Python tool for **small cryogenic bi-propellant rockets**
+(student-team scale: tank diameters ~0.2–0.5 m, engines of a few kN) that
+couples, over a user-specified burn/flight profile:
+
+1. **Mechanical slosh dynamics** — NASA SP-8009 equivalent-pendulum analog:
+   slosh frequency, slosh mass fraction, damping, and CG shift vs. fill level,
+   tank radius, and axial acceleration;
+2. **Lumped-parameter tank thermal/pressurization** — ullage gas, stratified
+   surface layer, bulk liquid, and wall nodes with mass/energy conservation:
+   self-pressurization and boil-off over time;
+3. **1D regenerative-cooling model** — Bartz hot-gas correlation +
+   Dittus-Boelter coolant-side convection + 1D wall conduction marched along
+   the chamber/throat/nozzle contour: wall temperatures, coolant enthalpy
+   rise, and pressure drop;
+4. **Coupling** — slosh-induced mixing perturbs tank stratification and
+   pressure; the propellant drawn from the tank (at its current outlet state)
+   **is** the regen coolant; the heated regen outlet state is tracked as the
+   **injector inlet condition** through the burn;
+5. A **rule-based feed-system P&ID recommender** for the selected
+   configuration (regulated / blowdown / autogenous / pump-fed).
+
+**Design choice, stated up front: there is no CFD anywhere in this tool —
+by design.** Every sub-model is the fast, analytical/empirical reduced-order
+model that student teams (and industry, for early design iterations) actually
+use before committing to CFD: mechanical slosh analogs, lumped-node tank
+thermodynamics, and Bartz-class 1D cooling analysis. It trades local fidelity
+for speed, transparency, and coverage of coupled system behavior.
+
+---
+
+## Install & run
+
+```bash
+pip install -e .           # needs Python >= 3.10; installs CoolProp, scipy, ...
+pip install -e ".[dev]"    # + pytest
+
+# end-to-end coupled burn (LOX/LCH4, methane-cooled, pump-fed):
+cryosim run examples/lch4_coupled_burn.yaml -o output/lch4_burn
+
+# tank-only LOX pad-hold self-pressurization + slosh parameters:
+cryosim run examples/lox_tank_selfpress.yaml -o output/lox_pad
+
+# feed-system component recommendation + schematic:
+cryosim pid examples/lch4_coupled_burn.yaml -o output/pid
+
+# tests (fast unit tests + slower validation regressions):
+pytest -q                  # everything
+pytest -q -m "not validation"   # fast unit tests only
+```
+
+Outputs: CSV time histories and PNG plots of ullage pressure, tank node
+temperatures, boil-off rate, slosh frequency/mass/CG shift, coolant outlet
+(= injector inlet) temperature, wall-temperature and heat-flux distributions,
+and coolant pressure drop / injector pressure margin.
+
+All fluid properties come from **CoolProp** through one wrapper
+(`cryosim/fluids.py`) used by both the tank and the coolant side, so the
+working fluid is swappable by name: LOX (tank default), liquid methane
+(coupled-demo default), ethanol, LH2 (used by the validation cases), N2, ...
+
+---
+
+## Physics and sources
+
+### Slosh (`cryosim/slosh_model.py`)
+
+Linear lateral slosh in an upright rigid cylinder, radius R, equivalent
+flat-bottom depth h, axial acceleration a; `xi_n` = roots of J1'(xi)=0:
+
+| Quantity | Expression |
+|---|---|
+| frequency | `omega_n^2 = (xi_n a / R) tanh(xi_n h/R)` |
+| slosh mass | `m_n = m_liq * 2 tanh(xi_n h/R) / [(h/R) xi_n (xi_n^2 - 1)]` |
+| pendulum length | `L_n = R / (xi_n tanh(xi_n h/R))` |
+| mass depth below surface | `d_n = (R/xi_n) tanh(xi_n h/2R)` |
+| smooth-wall damping | Mikishev–Dorozhkin: `zeta = 0.79 sqrt(nu/sqrt(a R^3)) * [depth corr.]` |
+
+Sources: NASA SP-8009 (Dodge, 1968); NASA SP-106 (Abramson, 1966); Dodge,
+*The New Dynamic Behavior of Liquids in Moving Containers* (SwRI, 2000).
+Dome ends are handled by the SP-8009 equal-volume flat-bottom depth; the
+model flags (`in_dome`) states where the free surface is inside a dome.
+
+### Tank thermal / self-pressurization (`cryosim/thermal_model.py`)
+
+Nodes: real-vapor ullage (CoolProp (rho,u) flash for pressure), saturated
+interface at `T_sat(P)`, thin stratified surface layer, bulk liquid, dry/wet
+wall (cryogenic cp(T), k(T) tables; axial liquid-line conduction). Interface
+energy balance sets evaporation/condensation:
+`mdot_evap = (Q_ullage->int + Q_surface->int)/h_fg`. Free convection via
+Churchill–Chu / McAdams correlations (Incropera & DeWitt ch. 9). Optional
+autogenous pressurant injection to a setpoint. The share of wetted-wall heat
+routed to the surface layer (`chi`, default 0.25) is a **calibrated**
+stratification parameter — see validation.
+
+### Regenerative cooling (`cryosim/regen_model.py`, `cryosim/combustion.py`)
+
+Per axial station, solved implicitly for the hot-wall temperature:
+
+```
+q = h_g (T_aw - T_wg) = (k_w/t_w)(T_wg - T_wc) = eta_fin h_c (T_wc - T_coolant)
+```
+
+* `h_g` — Bartz (1957) with the sigma property correction and turbulent
+  recovery `r = Pr^(1/3)`;
+* `h_c` — Dittus-Boelter `Nu = 0.023 Re^0.8 Pr^0.4` (+ optional Sieder-Tate
+  viscosity-ratio and helix curvature corrections); channel lands as straight
+  fins (Huzel & Huang ch. 4; NASA SP-8087);
+* coolant march: enthalpy update per station; Darcy pressure drop with the
+  Haaland friction factor + momentum (acceleration) term; local CoolProp
+  properties capture transcritical methane behavior.
+
+Combustion-gas properties (T_c, gamma, M, mu, Pr) should come from a CEA/RPA
+run for your propellants and O/F; nominal presets for LOX/CH4 and
+LOX/ethanol are included for convenience.
+
+### Coupling (`cryosim/coupling.py`)
+
+Outer time loop: tank ODEs integrated with the engine-demanded outflow
+(`mdot = Pc At / c*` × coolant fraction) and flight acceleration; slosh
+first mode integrated under the lateral-acceleration input with
+quasi-static parameters; regen solved **quasi-steadily** (regen thermal time
+constants ~ms ≪ tank time scales ~s) at a configurable interval with
+coolant inlet = current tank outlet state (bulk T; ullage pressure +
+hydrostatic head − feed loss + optional pump rise). Slosh feeds back into
+the tank via a mixing factor `Phi = 1 + c_mix |x1|/R` that enhances
+interfacial exchange and destratifies the surface layer.
+
+---
+
+## Validation status — read this before trusting numbers
+
+Each sub-model ships with regression tests (`validation/`, run via
+`pytest -m validation`). **What was and wasn't possible is stated
+explicitly**; the development environment could not download full NASA/paper
+PDFs (network restricted to package registries), so validation anchors to
+quantitative statements in report abstracts, exactly-computable analytical
+references, and documented operating bands — never to silently invented
+numbers.
+
+| Sub-model | Reference | What is reproduced | Status |
+|---|---|---|---|
+| Slosh frequencies, masses, analog | NASA SP-106 ch. 2 / SP-8009 analytical solution (experimentally confirmed in those programs); Bessel eigenvalues via scipy | Dimensionless frequency table values, slosh-mass limits, CG conservation, exact resonant magnification | **Validated** against the published linear theory (the accepted design reference for linear slosh) |
+| Slosh damping | Mikishev–Dorozhkin correlation as given in Dodge (2000) | Hand-evaluated correlation points, viscosity/depth scaling | **Correlation reproduced**; the correlation itself is empirical (±~30% scatter). No digitized TN D-1367 traces were accessible |
+| Tank self-pressurization | NASA K-site flightweight 4.89 m³ LH2 tank: Hasan/Lin/Van Dresar (NTRS 19910011011), Van Dresar & Lin TM-105411 (NTRS 19920009200) | Quasi-steady dP/dt vs the analytic homogeneous rate falls in the report-stated band per fill level (≤~2× at 29/49%, >3× at 83% at 3.5 W/m²); homogeneous reference cross-checked by two independent implementations | **Band-validated**. Known limitation: the reports' non-monotonic fill trend (49% slowest) is NOT reproduced; mid-fill over-predicted ~20–30% (conservative for vent sizing). `chi` = 0.25 is calibrated to this dataset |
+| Regen: friction/coolant side | Colebrook–White equation; Incropera & DeWitt | Haaland vs implicit Colebrook <2% over Re, roughness grid; Dittus-Boelter hand values | **Validated** (exact) |
+| Regen: hot-gas side | Bartz (1957) | Independent hand-assembled evaluation of the published equation + scaling laws | **Implementation-verified**. Bartz itself over-predicts LOX/CH4 heat flux by ~20–30% (ODREC, Appl. Sci. 14(1):71, 2024; JAXA EUCASS 2017-381) — conservative; no silent correction applied |
+| Regen: system level | CIRA HYPROB 30 kN LOX/LCH4 demonstrator class (96-channel methane-cooled jacket; the dataset ODREC validated against) | Model lands in the documented operating bands: throat flux tens of MW/m², copper wall peak at throat <1000 K, transcritical CH4 outlet 350–550 K, tens of bar jacket drop | **Band-validated only** — full tabulated HYPROB data not accessible offline; stated, not hidden |
+| Slosh → thermal coupling | Ludwig & Dreyer, Cryogenics 63 (2014) — qualitative | Mixing knob direction only (slosh → destratification → pressure effect) | **UNVALIDATED**. `c_mix` is a parametric knob. No public quantitative dataset was found at this scale |
+
+## Assumptions & limitations (per module)
+
+* **Global**: axisymmetric rigid tanks; single-species tank fluid (no helium
+  pressurant — an autogenous setpoint mode is provided instead); no CFD.
+* **Slosh**: linear small-amplitude lateral slosh only — no swirl/rotary or
+  breaking-wave regimes, no baffle model (pass your own damping ratio),
+  large Bond number assumed, analog degraded when the surface is in a dome.
+* **Thermal**: single-slab stratified layer (no continuous profile); free-
+  convection closures at flat-plate level; calibrated `chi`;
+  wall property tables are curve-fit approximations (NIST cryo data).
+* **Regen**: quasi-1D; no injector-region boundary-layer development; frozen
+  gas composition, calorically-perfect isentropic relations; adiabatic
+  closeout; radiation neglected; **no boiling model** — two-phase coolant
+  states are flagged (`boiling_detected`), not resolved, and transcritical
+  heat-transfer deterioration near the pseudo-critical point is not modeled;
+  conical (not bell) divergent section.
+* **Coupling**: quasi-steady regen; mixing knob unvalidated (above);
+  oxidizer tank represented only through the mixture ratio (model the ox
+  tank by running a second instance with `coolant_is_fuel: false`).
+* **P&ID recommender**: a checklist aid encoding common student-team
+  practice — explicitly **not** a safety-reviewed P&ID.
+
+## A finding worth knowing (from the coupled demo)
+
+Full-flow methane regen cooling of a **small** engine is marginal at
+subcritical feed pressure: heated CH4 crosses the two-phase dome inside the
+jacket (the tool flags this) and pressure-fed tank pressures can't exceed
+methane's 46 bar critical pressure with a saturated ullage. The shipped
+demo therefore uses a **pump-fed** architecture (3 bar autogenous tank,
+~90 bar supercritical channels) — the same reason HYPROB feeds its jacket
+at ~160 bar.
+
+## Repository layout
+
+```
+cryosim/            the package (one module per sub-model; see docstrings)
+tests/              fast unit tests
+validation/         regression tests vs published references (pytest -m validation)
+examples/           YAML configs + notebook
+```
+
+## References
+
+* Abramson, H.N. (ed.), *The Dynamic Behavior of Liquids in Moving
+  Containers*, NASA SP-106, 1966.
+* Dodge, F.T., *Propellant Slosh Loads*, NASA SP-8009, 1968; and *The New
+  Dynamic Behavior of Liquids in Moving Containers*, SwRI, 2000.
+* Hasan, Lin & Van Dresar, *Self-pressurization of a flightweight liquid
+  hydrogen storage tank subjected to low heat flux*, NASA TM (NTRS
+  19910011011), 1991; Van Dresar & Lin, NASA TM-105411 (NTRS 19920009200), 1992.
+* Bartz, D.R., *A Simple Equation for Rapid Estimation of Rocket Nozzle
+  Convective Heat Transfer Coefficients*, Jet Propulsion 27(1), 1957.
+* NASA SP-8087, *Liquid Rocket Engine Fluid-Cooled Combustion Chambers*, 1972.
+* Huzel & Huang, *Modern Engineering for Design of Liquid-Propellant Rocket
+  Engines*, AIAA, 1992.
+* Kose & Celik, *Regenerative Cooling Comparison of LOX/LCH4 and LOX/LC3H8
+  Rocket Engines Using ODREC*, Appl. Sci. 14(1):71, 2024 (and the CIRA
+  HYPROB experimental papers by Ricci, Battista et al. cited therein).
+* Ludwig & Dreyer, *Investigations on thermodynamic phenomena of the
+  active-pressurization process of a cryogenic propellant tank*, Cryogenics 63, 2014.
+* Incropera & DeWitt, *Fundamentals of Heat and Mass Transfer* (convection
+  correlations); Bell et al., CoolProp (doi:10.1021/ie4033999).
+
+---
+
+*Personal portfolio project (DARE Stratos V / Axolotl context) — not
+official DARE work. MIT license.*

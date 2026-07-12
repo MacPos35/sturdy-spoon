@@ -1,0 +1,66 @@
+# Coupled burn demo: 5 kN-class LOX/LCH4 engine, methane tank feeding the
+# regen jacket through an electric feed pump (channels supercritical), tank
+# autogenously held at 3 bar.
+#
+# Run:  cryosim run examples/lch4_coupled_burn.yaml -o output/lch4_burn
+
+mode: coupled
+fluid: LCH4
+
+tank:
+  radius: 0.20            # m  (0.4 m diameter, student scale)
+  cyl_length: 1.0         # m
+  bottom_dome: elliptical
+  top_dome: elliptical
+  dome_aspect: 2.0        # 2:1 elliptical heads
+  wall_mass: 25.0         # kg (Al liner class)
+  heat_flux: 150.0        # W/m^2 pad/ascent aero heating estimate
+  thermal:
+    pressurant_setpoint: 300000.0   # Pa — autogenous hold at 3 bar
+    pressurant_max_flow: 0.1        # kg/s
+
+initial:
+  pressure: 300000.0      # Pa
+  fill_fraction: 0.9
+  T_liquid: 118.0         # K (subcooled vs 122 K sat at 3 bar)
+
+slosh:
+  zeta_override: null     # smooth-wall Mikishev-Dorozhkin damping
+
+engine:
+  throat_radius: 0.019    # m -> ~5 kN at Pc = 30 bar
+  contraction_ratio: 6.0
+  expansion_ratio: 4.5
+  chamber_length: 0.09    # m (cylindrical section)
+  n_points: 100
+  mixture_ratio: 3.4      # O/F; coolant = full fuel flow
+  coolant_is_fuel: true
+  gas: lox/ch4            # CEA-derived preset; replace with your CEA values
+  channels:
+    n_channels: 60
+    channel_width: 0.0010   # m
+    channel_height: 0.0014  # m
+    t_wall: 0.0007          # m hot-wall (CuCrZr class)
+    k_wall: 330.0           # W/(m K)
+
+burn:
+  t_end: 20.0
+  pc: 3000000.0                        # Pa (constant; tables allowed)
+  axial_accel_g: [[0.0, 3.0], [20.0, 7.0]]   # ramps 3 g -> 7 g
+  lateral_accel:
+    amplitude: 0.8        # m/s^2
+    frequency: 0.9        # Hz — deliberately near the 1st slosh mode
+
+coupled:
+  dt: 0.25
+  regen_interval: 1.0
+  pump_dp: 8700000.0      # Pa — e-pump to ~90 bar channels (supercritical CH4)
+  feed_dp: 50000.0
+  c_mix: 5.0              # slosh->thermal mixing gain (parametric, unvalidated)
+
+feed_system:              # for `cryosim pid`
+  pressurization: pump
+  regen_cooled: true
+  tanks:
+    - {name: LOX,  cryogenic: true, oxidizer: true}
+    - {name: LCH4, cryogenic: true, is_coolant: true}

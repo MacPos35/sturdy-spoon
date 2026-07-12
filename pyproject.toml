@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cryosim"
+version = "0.1.0"
+description = "Coupled slosh + thermal/pressurization + regenerative-cooling reduced-order simulator for small cryogenic bi-propellant rockets"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "macpos35" }]
+keywords = ["rocket", "cryogenic", "slosh", "regenerative cooling", "propulsion"]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "CoolProp>=6.4",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+cryosim = "cryosim.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cryosim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "validation"]
+markers = [
+    "validation: regression tests against published reference data (slower)",
+]

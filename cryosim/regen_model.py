@@ -118,6 +118,9 @@ class RegenResult:
     dP_total: float               # Pa, coolant pressure drop
     coolant_inlet: object         # FluidState
     coolant_outlet: object        # FluidState
+    #: True if any station's coolant state fell inside the vapor dome —
+    #: single-phase correlations are invalid there (no boiling model!).
+    boiling_detected: bool = False
 
     @property
     def peak_wall_temperature(self) -> float:
@@ -181,10 +184,12 @@ class RegenCoolingModel:
         mdot_ch = mdot_coolant / ch.n_channels
         A_ch = ch.flow_area
         G = mdot_ch / A_ch  # channel mass flux
+        boiling = False
 
         x = ct.x
         for k, i in enumerate(order):
             st = f.state_PH(P, h_bulk)
+            boiling = boiling or st.two_phase
             v = G / st.rho
             Re = G * ch.D_h / st.mu
             Pr = st.Pr
@@ -261,4 +266,5 @@ class RegenCoolingModel:
             Q_total=float(np.sum(q * dA)),
             dP_total=float(P_inlet - P),
             coolant_inlet=inlet_state, coolant_outlet=outlet_state,
+            boiling_detected=boiling or outlet_state.two_phase,
         )

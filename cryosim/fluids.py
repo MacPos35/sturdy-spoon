@@ -49,7 +49,13 @@ def canonical_name(name: str) -> str:
 
 @dataclass(frozen=True)
 class FluidState:
-    """Thermodynamic + transport state at a point (SI units)."""
+    """Thermodynamic + transport state at a point (SI units).
+
+    ``two_phase`` marks states inside the vapor dome: thermodynamic values
+    are mixture values, but transport properties (cp, mu, k) are those of
+    the saturated liquid — single-phase correlations using them are NOT
+    valid there (the regen model flags this as ``boiling_detected``).
+    """
 
     T: float          # K
     P: float          # Pa
@@ -59,6 +65,7 @@ class FluidState:
     cp: float         # J/(kg K)
     mu: float         # Pa s
     k: float          # W/(m K)
+    two_phase: bool = False
 
     @property
     def Pr(self) -> float:
@@ -95,17 +102,30 @@ class Fluid:
         )
 
     def state_PH(self, P: float, h: float) -> FluidState:
-        """State from pressure and specific enthalpy (regen coolant marching)."""
+        """State from pressure and specific enthalpy (regen coolant marching).
+
+        Handles two-phase (boiling) states: thermodynamics are mixture
+        values, transport properties fall back to the saturated liquid and
+        the state is flagged ``two_phase`` (see FluidState docstring).
+        """
         args = ("P", P, "Hmass", h, self.name)
-        return FluidState(
-            T=PropsSI("T", *args), P=P,
-            rho=PropsSI("Dmass", *args),
-            h=h,
-            u=PropsSI("Umass", *args),
-            cp=PropsSI("Cpmass", *args),
-            mu=PropsSI("viscosity", *args),
-            k=PropsSI("conductivity", *args),
-        )
+        T = PropsSI("T", *args)
+        rho = PropsSI("Dmass", *args)
+        u = PropsSI("Umass", *args)
+        try:
+            return FluidState(
+                T=T, P=P, rho=rho, h=h, u=u,
+                cp=PropsSI("Cpmass", *args),
+                mu=PropsSI("viscosity", *args),
+                k=PropsSI("conductivity", *args),
+            )
+        except ValueError:
+            # inside the vapor dome: transport from saturated liquid
+            sl = self.sat_liquid(P)
+            return FluidState(
+                T=T, P=P, rho=rho, h=h, u=u,
+                cp=sl.cp, mu=sl.mu, k=sl.k, two_phase=True,
+            )
 
     def flash_rho_u(self, rho: float, u: float) -> tuple[float, float]:
         """(P, T) from density and internal energy — the ullage-node closure."""

@@ -45,12 +45,40 @@ couples, over a user-specified burn/flight profile:
    Sizing heuristics and their limits (no surge/water-hammer or bend
    analysis) are documented in the module docstring and the output itself.
 
-**Design choice, stated up front: there is no CFD anywhere in this tool —
-by design.** Every sub-model is the fast, analytical/empirical reduced-order
-model that student teams (and industry, for early design iterations) actually
-use before committing to CFD: mechanical slosh analogs, lumped-node tank
-thermodynamics, and Bartz-class 1D cooling analysis. It trades local fidelity
-for speed, transparency, and coverage of coupled system behavior.
+**Design choice, stated up front: the design models are reduced-order, not
+CFD.** Every design sub-model is the fast, analytical/empirical model that
+student teams (and industry, for early design iterations) actually use
+before committing to CFD: mechanical slosh analogs, lumped-node tank
+thermodynamics, and Bartz-class 1D cooling analysis. It trades local
+fidelity for speed, transparency, and coverage of coupled system behavior.
+One genuine CFD solver IS included (`cryosim cfd`) — an **inviscid
+axisymmetric Euler** finite-volume solver whose only job is to *verify* the
+quasi-1D flow assumption on your actual contour; being inviscid it has no
+boundary layers, no turbulence, and predicts **no wall heat transfer** — it
+does not, and cannot, replace the Bartz model or RANS for thermal design.
+
+Beyond the core coupled simulation, three design-study tools are included:
+
+* **`cryosim optimize`** — max-performance cooling-channel search
+  (channel count/width/height/wall thickness) minimizing peak wall
+  temperature under a pressure-drop budget, with manufacturability floors
+  deliberately treated as *warnings*, not constraints: the optimizer is
+  allowed to find hard-to-manufacture geometry, and on the shipped 5 kN
+  LOX/CH4 example it independently rediscovers the NASA **high-aspect-ratio
+  cooling channel (HARCC)** configuration (many narrow, deep channels:
+  peak wall 1014 → 711 K *and* lower Δp; cf. Wadel & Meyer, AIAA 96-2584),
+  flagged with the manufacturing process each feature actually needs.
+* **`cryosim cfd`** — the Euler flow-field check described above (first-
+  order Rusanov scheme; on the demo contour: mass flow within ~3% of
+  quasi-1D, exit Mach −7%, both shrinking under grid refinement).
+* **`cryosim gimbal`** — automatic TVC stabilization of an imaginary rigid
+  rocket **including the slosh pendulum** from the slosh model: a PD
+  attitude controller auto-tuned by pole placement on the vehicle's own
+  inertia/thrust/geometry (signed plant gain), actuator lag + angle/rate
+  limits, closed-loop eigenvalue stability verdict, and the classic
+  slosh/TVC interaction warning when the control bandwidth approaches the
+  slosh frequency. Linear, planar, no aerodynamics — an interaction-study
+  tool, not a 6-DOF (stated in the module docstring).
 
 ---
 
@@ -172,6 +200,9 @@ numbers.
 | Regen: hot-gas side | Bartz (1957) | Independent hand-assembled evaluation of the published equation + scaling laws | **Implementation-verified**. Bartz itself over-predicts LOX/CH4 heat flux by ~20–30% (ODREC, Appl. Sci. 14(1):71, 2024; JAXA EUCASS 2017-381) — conservative; no silent correction applied |
 | Regen: system level | CIRA HYPROB 30 kN LOX/LCH4 demonstrator class (96-channel methane-cooled jacket; the dataset ODREC validated against) | Model lands in the documented operating bands: throat flux tens of MW/m², copper wall peak at throat <1000 K, transcritical CH4 outlet 350–550 K, tens of bar jacket drop | **Band-validated only** — full tabulated HYPROB data not accessible offline; stated, not hidden |
 | Slosh → thermal coupling | Ludwig & Dreyer, Cryogenics 63 (2014) — qualitative | Mixing knob direction only (slosh → destratification → pressure effect) | **UNVALIDATED**. `c_mix` is a parametric knob. No public quantitative dataset was found at this scale |
+| Channel optimizer | NASA HARCC demonstration (Wadel & Meyer, AIAA 96-2584) | Optimizer independently converges on the high-aspect-ratio channel configuration known experimentally to cut wall temperature and Δp | **Concept-anchored** (the optimum's *character* matches the published result; magnitudes inherit the regen model's validation status) |
+| Euler CFD | Quasi-1D isentropic theory (exact for smooth C-D nozzles; Anderson ch. 5) | Mass-flow bias ≤ ~3%, exit Mach ≤ ~7% low, both shrinking under refinement (first-order scheme); transonic at the geometric throat; mass conservation along the duct | **Verified vs the 1D exact reference**; inviscid — NOT validated (or usable) for heat transfer |
+| Gimbal/TVC | Linear control theory + slosh-vehicle equations (SP-8009 ch. 4 / Dodge 2000 ch. 5 formulation) | Closed-loop eigen-structure (slosh pair at ω_s, pole placement at requested bandwidth), gust recovery, gain scaling with inertia | **Verified vs linear theory**; no experimental TVC dataset used — no aero, planar, rigid body |
 
 ## Assumptions & limitations (per module)
 

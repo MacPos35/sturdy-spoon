@@ -64,3 +64,28 @@ feed_system:              # for `cryosim pid`
   tanks:
     - {name: LOX,  cryogenic: true, oxidizer: true}
     - {name: LCH4, cryogenic: true, is_coolant: true}
+
+optimize:                 # for `cryosim optimize` — max-performance channels
+  dp_budget: 2500000.0    # Pa jacket-drop budget
+  n_random: 40
+  n_polish: 40
+  seed: 1
+
+gimbal:                   # for `cryosim gimbal` — imaginary 3 m rocket, stations from nozzle exit [m]
+  dry_mass: 60.0
+  dry_cg: 1.7
+  dry_inertia: 45.0       # kg m^2 (pitch, about dry CG)
+  tank_bottom: 0.9
+  engine_station: 0.0
+  thrust: 5000.0
+  fill_fraction: 0.7
+  accel_g: 4.0
+  bandwidth_hz: 1.0
+  damping: 0.7
+  gust: {force: 120.0, t0: 1.0, duration: 0.4}
+  t_end: 20.0
+
+cfd:                      # for `cryosim cfd` — inviscid Euler flow-field check
+  n_axial: 120
+  n_radial: 24
+  max_iter: 6000

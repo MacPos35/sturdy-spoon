@@ -344,6 +344,136 @@ def _size_lines(cfg: dict, fcfg) -> tuple[list, dict]:
     return specs, labels
 
 
+def _pc_of(cfg: dict) -> float:
+    pc_spec = cfg.get("burn", {}).get("pc", 20e5)
+    return float(pc_spec) if isinstance(pc_spec, (int, float)) else \
+        max(float(v) for _, v in pc_spec)
+
+
+def _coolant_inlet(cfg: dict) -> tuple[float, float]:
+    """(T, P) of the regen coolant inlet per the coupled-config heuristics."""
+    init = cfg.get("initial", {})
+    T_in = float(init.get("T_liquid") or 111.0)
+    P_tank = float(init.get("pressure", 3e5))
+    pump_dp = float(cfg.get("coupled", {}).get("pump_dp", 0.0))
+    return T_in, P_tank + pump_dp
+
+
+def run_optimize(cfg: dict, outdir: str) -> None:
+    """Max-performance channel design search around the config's engine."""
+    from .optimize import optimize_channels
+
+    engine = build_engine(cfg)
+    fluid = Fluid(cfg.get("fluid", "LCH4"))
+    Pc = _pc_of(cfg)
+    mdot_cool = engine.mdot_total(Pc) * engine.coolant_fraction
+    T_in, P_in = _coolant_inlet(cfg)
+    oc = cfg.get("optimize", {})
+    print("optimizing channel design (this runs many regen solves)...")
+    result = optimize_channels(
+        engine.contour, engine.gas, fluid, Pc, mdot_cool, T_in, P_in,
+        dp_budget=float(oc.get("dp_budget", 30e5)),
+        k_wall=engine.channels.k_wall,
+        n_random=int(oc.get("n_random", 40)),
+        n_polish=int(oc.get("n_polish", 40)),
+        seed=int(oc.get("seed", 1)),
+        baseline=engine.channels,
+    )
+    print(result.report())
+    with open(os.path.join(outdir, "optimized_channels.txt"), "w") as fh:
+        fh.write(result.report() + "\n")
+    plots.plot_regen_distribution(
+        result.result, engine.contour.x_throat,
+        os.path.join(outdir, "optimized_regen_axial.png"),
+        title="Optimized channel design — axial distributions",
+    )
+    print(f"written: {outdir}/optimized_channels.txt, "
+          f"{outdir}/optimized_regen_axial.png")
+
+
+def run_gimbal(cfg: dict, outdir: str) -> None:
+    """Slosh-coupled TVC stabilization of the configured (imaginary) rocket."""
+    from .gimbal_control import (GimbalController, VehicleModel,
+                                 plot_gimbal, simulate_gimbal)
+    from .slosh_model import SloshModel
+
+    fluid, geom, _ = build_tank(cfg)
+    gc = cfg.get("gimbal", {})
+    engine = build_engine(cfg) if "engine" in cfg else None
+    Pc = _pc_of(cfg)
+    thrust = float(gc.get("thrust", 1.6 * Pc * engine.contour.At
+                          if engine else 5000.0))
+    fill = float(gc.get("fill_fraction",
+                        cfg.get("initial", {}).get("fill_fraction", 0.7)))
+    accel_g = float(gc.get("accel_g", 4.0))
+    P_tank = float(cfg.get("initial", {}).get("pressure", 3e5))
+    sp = SloshModel(fluid, geom).params_at(fill * geom.V_total, P_tank,
+                                           accel=accel_g * G0)
+    vehicle = VehicleModel.from_components(
+        dry_mass=float(gc.get("dry_mass", 60.0)),
+        dry_cg=float(gc.get("dry_cg", 1.7)),
+        dry_inertia=float(gc.get("dry_inertia", 45.0)),
+        tank_bottom=float(gc.get("tank_bottom", 0.9)),
+        slosh=sp,
+        engine_station=float(gc.get("engine_station", 0.0)),
+        thrust=thrust,
+    )
+    ctl = GimbalController.auto_tune(
+        vehicle,
+        bandwidth_hz=float(gc.get("bandwidth_hz", 1.0)),
+        damping=float(gc.get("damping", 0.7)),
+    )
+    gust = gc.get("gust", {"force": 120.0, "t0": 1.0, "duration": 0.4})
+    dist = (lambda t: float(gust["force"])
+            if float(gust["t0"]) < t < float(gust["t0"]) + float(gust["duration"])
+            else 0.0)
+    # gust applied at a station (default: nose-ish, 1 m above the dry CG)
+    gust_station = float(gust.get("station",
+                                  float(gc.get("dry_cg", 1.7)) + 1.0))
+    hist = simulate_gimbal(vehicle, ctl,
+                           t_end=float(gc.get("t_end", 20.0)),
+                           disturbance=dist,
+                           x_disturbance=gust_station - vehicle.x_cg_datum)
+    plot_gimbal(hist, os.path.join(outdir, "gimbal.png"))
+    print(f"auto-tuned gains: Kp={ctl.Kp:.3f}, Kd={ctl.Kd:.3f} "
+          f"(bandwidth {ctl.bandwidth/2/np.pi:.2f} Hz); slosh mode "
+          f"{vehicle.omega_slosh/2/np.pi:.2f} Hz, "
+          f"slosh mass {vehicle.m_slosh/vehicle.m_total*100:.1f}%")
+    print(f"closed loop {'STABLE' if hist.stable else 'UNSTABLE'}; "
+          f"max |theta| = {hist.max_theta_deg:.2f} deg; "
+          f"settled = {hist.settled}")
+    for w in hist.warnings:
+        print(f"  ! {w}")
+    print(f"written: {outdir}/gimbal.png")
+
+
+def run_cfd(cfg: dict, outdir: str) -> None:
+    """Inviscid Euler check of the quasi-1D nozzle-flow assumption."""
+    from .cfd_nozzle import NozzleEulerCFD, plot_cfd
+
+    engine = build_engine(cfg)
+    Pc = _pc_of(cfg)
+    cc = cfg.get("cfd", {})
+    solver = NozzleEulerCFD(engine.contour, engine.gas, Pc,
+                            n_axial=int(cc.get("n_axial", 120)),
+                            n_radial=int(cc.get("n_radial", 24)))
+    print("running axisymmetric Euler solver (inviscid — flow-field check "
+          "only, no wall heat transfer)...")
+    res = solver.run(max_iter=int(cc.get("max_iter", 6000)))
+    x, mdot = res.mdot_profile()
+    m1d = res.mdot_quasi1d()
+    mc = res.centerline_mach()[1]
+    m1 = res.quasi1d_mach()
+    print(f"mass flow: CFD {np.mean(mdot[5:-5]):.3f} kg/s vs quasi-1D "
+          f"{m1d:.3f} kg/s ({(np.mean(mdot[5:-5])-m1d)/m1d*100:+.1f}%)")
+    print(f"exit Mach: CFD centerline {mc[-1]:.2f} vs quasi-1D {m1[-1]:.2f}")
+    if not res.converged:
+        print("note: residual not fully converged — treat as qualitative; "
+              "raise max_iter/refine grid for quantitative use")
+    plot_cfd(res, os.path.join(outdir, "cfd_nozzle.png"))
+    print(f"written: {outdir}/cfd_nozzle.png")
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(
         prog="cryosim",
@@ -351,8 +481,13 @@ def main(argv=None) -> None:
                     "for small cryogenic bi-propellant rockets",
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, help_ in (("run", "run a simulation from a YAML config"),
-                        ("pid", "feed-system P&ID recommendation")):
+    for name, help_ in (
+        ("run", "run a simulation from a YAML config"),
+        ("pid", "feed-system P&ID recommendation + line sizing"),
+        ("optimize", "max-performance cooling-channel design search"),
+        ("gimbal", "slosh-coupled TVC stabilization study"),
+        ("cfd", "axisymmetric Euler check of the quasi-1D assumption"),
+    ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("config", help="YAML configuration file")
         p.add_argument("-o", "--outdir", default="output",
@@ -365,6 +500,12 @@ def main(argv=None) -> None:
 
     if args.cmd == "pid":
         run_pid(cfg, args.outdir)
+    elif args.cmd == "optimize":
+        run_optimize(cfg, args.outdir)
+    elif args.cmd == "gimbal":
+        run_gimbal(cfg, args.outdir)
+    elif args.cmd == "cfd":
+        run_cfd(cfg, args.outdir)
     elif cfg.get("mode", "coupled") == "tank_only":
         run_tank_only(cfg, args.outdir)
     else:

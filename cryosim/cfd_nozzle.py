@@ -274,8 +274,8 @@ def plot_cfd(result: CFDResult, path: str) -> str:
     ax0 = fig.add_subplot(gs[0])
     for sgn in (1, -1):
         pc = ax0.pcolormesh(result.x * 100, sgn * result.r * 100,
-                            result.mach, cmap="viridis", shading="auto",
-                            vmin=0.0)
+                            result.mach, cmap="viridis",
+                            shading="gouraud", vmin=0.0)
     fig.colorbar(pc, ax=ax0, label="Mach")
     ax0.plot(result.contour.x * 100, result.contour.r * 100, color="k", lw=1.2)
     ax0.plot(result.contour.x * 100, -result.contour.r * 100, color="k", lw=1.2)

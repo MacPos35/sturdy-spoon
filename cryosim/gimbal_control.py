@@ -74,6 +74,8 @@ class VehicleModel:
     zeta_slosh: float       # -
     x_engine: float         # m, gimbal station (negative: below CG)
     thrust: float           # N
+    x_cg_datum: float = 0.0  # composite-CG station in the user's datum
+                             # (set by from_components; for station conversion)
 
     def __post_init__(self):
         cg = (self.m_rigid * self.x_rigid + self.m_slosh * self.x_slosh) \
@@ -151,6 +153,7 @@ class VehicleModel:
             zeta_slosh=slosh.zeta_viscous,
             x_engine=engine_station - x_cg,
             thrust=thrust,
+            x_cg_datum=x_cg,
         )
 
 

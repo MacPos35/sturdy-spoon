@@ -30,7 +30,8 @@ import numpy as np
 from .engine_design import EngineDesign, LINER_MATERIALS
 from .plots import plot_regen_distribution
 from .voxel_geometry import (MeshQA, build_chamber_jacket,
-                             build_injector_head, mesh_qa, mesh_solid)
+                             build_injector_head, concat_meshes, mesh_qa,
+                             mesh_solid)
 
 #: Bulk densities for the printed-mass estimate [kg/m^3].
 PART_DENSITY = {"chamber_jacket": None, "injector_head": 7980.0}
@@ -179,15 +180,15 @@ def generate_package(design: EngineDesign, outdir: str,
                           rho=PART_DENSITY["injector_head"]))
         say(qa[-1].describe())
 
-        say("meshing assembly ...")
-        assembly = solid | solid_i
-        lo_a = tuple(min(a, b) for a, b in zip(lo, lo_i))
-        hi_a = tuple(max(a, b) for a, b in zip(hi, hi_i))
-        asm = mesh_solid(assembly, lo_a, hi_a, voxel_jacket_mm * 1e-3)
+        say("assembling multi-shell engine ...")
+        # combine the two already-watertight shells rather than re-meshing
+        # the union at a compromise voxel (which would under-resolve the
+        # injector's fine features and pinch the topology)
+        asm = concat_meshes([jacket, head], voxel_jacket_mm * 1e-3)
         p = os.path.join(outdir, "engine_assembly.stl")
         asm.save_stl(p, b"cryosim engine assembly")
         paths["engine_assembly"] = p
-        qa.append(mesh_qa(asm, "engine_assembly.stl"))
+        qa.append(mesh_qa(asm, "engine_assembly.stl", rho=None))
         say(qa[-1].describe())
 
     # ---- trace + report ----------------------------------------------------

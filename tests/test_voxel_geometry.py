@@ -15,6 +15,7 @@ from cryosim.voxel_geometry import (
     TorusX,
     build_chamber_jacket,
     build_injector_head,
+    concat_meshes,
     mesh_qa,
     mesh_solid,
 )
@@ -94,6 +95,18 @@ def test_stl_roundtrip(tmp_path):
     # must lie inside the bounding sphere
     vals = struct.unpack("<9f", raw[84 + 12:84 + 48])
     assert max(abs(v) for v in vals) <= 25.0
+
+
+def test_concat_meshes_watertight_and_additive():
+    """Two disjoint watertight shells concatenate into one watertight,
+    volume-additive multi-shell mesh."""
+    a = mesh_solid(Sphere((0, 0, 0), 0.02), (-0.02,) * 3, (0.02,) * 3, 0.002)
+    b = mesh_solid(Sphere((0.1, 0, 0), 0.015), (0.08, -0.02, -0.02),
+                   (0.12, 0.02, 0.02), 0.002)
+    both = concat_meshes([a, b], 0.002)
+    assert both.is_watertight()
+    assert both.n_triangles == a.n_triangles + b.n_triangles
+    assert both.volume() == pytest.approx(a.volume() + b.volume(), rel=1e-9)
 
 
 def test_empty_solid_raises():

@@ -151,6 +151,12 @@ cryosim design examples/engine_5kn_methalox.yaml -o output/engine
 → watertight STLs: chamber_jacket / injector_head / engine_assembly
 ```
 
+The [console log](results/console_design.txt) was captured with coarser
+voxels (`--voxel-jacket 1.0 --voxel-injector 0.6`) so it runs in ~90 s and
+the STLs stay a manageable size; the finer defaults (0.5 / 0.3 mm) resolve
+the cooling channels and swirlers for print prep but produce much larger
+meshes. The watertightness invariant holds at every resolution.
+
 ![engine cross-section](results/design_cross_section.png)
 
 ![injector face layout](results/design_injector_face.png)

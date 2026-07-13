@@ -360,6 +360,28 @@ class MeshQA:
                 f"x{self.bbox_mm[2]:.0f} mm")
 
 
+def concat_meshes(meshes: list[TriMesh], voxel_size: float) -> TriMesh:
+    """Combine several meshes into one multi-shell mesh.
+
+    Vertices/faces are concatenated with index offsets, so each input shell
+    keeps its own independent topology. A set of individually watertight
+    shells therefore yields a watertight (edge-paired) combined mesh — the
+    right way to assemble parts that abut or interpenetrate, without the
+    coarse re-meshing a boolean union would require. Slicers treat the
+    overlapping shells as a union at print time.
+    """
+    if not meshes:
+        raise ValueError("no meshes to concatenate")
+    verts, faces, offset = [], [], 0
+    for m in meshes:
+        verts.append(m.vertices)
+        faces.append(m.faces + offset)
+        offset += len(m.vertices)
+    return TriMesh(vertices=np.vstack(verts),
+                   faces=np.ascontiguousarray(np.vstack(faces)),
+                   voxel_size=voxel_size)
+
+
 def mesh_qa(mesh: TriMesh, name: str, rho: float | None = None) -> MeshQA:
     lo, hi = mesh.bounds()
     ext = (hi - lo) * 1e3

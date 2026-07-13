@@ -403,9 +403,15 @@ class Schematic:
 # ==========================================================================
 # Layout driver
 # ==========================================================================
-def draw_pid(rec, path: str) -> str:
-    """Render a FeedSystemRecommendation as a P&ID-style schematic."""
+def draw_pid(rec, path: str, line_labels: dict | None = None) -> str:
+    """Render a FeedSystemRecommendation as a P&ID-style schematic.
+
+    ``line_labels``: optional short tube-spec strings from the line-sizing
+    module, keyed 'oxidizer' / 'fuel' / 'pressurant' / 'coolant_hp' —
+    drawn along the corresponding runs.
+    """
     cfg = rec.config
+    line_labels = line_labels or {}
     sc = Schematic()
     tanks = cfg.tanks[:3]
     n = len(tanks)
@@ -558,6 +564,14 @@ def draw_pid(rec, path: str) -> str:
         sc.valve_remote(b[0], y_mv, None, s=1.9, vertical=True)
         sc.tag(b[0] - 5.4, y_mv, find_tag(sub, "main valve") or "MV",
                size=4.2)
+        spec_key = "oxidizer" if tk.oxidizer else "fuel"
+        if spec_key in line_labels:
+            if tk.oxidizer:
+                sc.tag(b[0] + 2.2, y_mv - 7.0, line_labels[spec_key],
+                       size=3.6, ha="left", color=col)
+            else:
+                sc.tag(b[0] - 4.2, y_mv - 7.0, line_labels[spec_key],
+                       size=3.6, ha="right", color=col)
         sc.flow_arrow(b[0], y_flt + 3.6, -90, col)
         y_end = y_mv - 3.0
         # oxidizer purge tee
@@ -600,6 +614,9 @@ def draw_pid(rec, path: str) -> str:
             sc.flow_arrow(fx, (y0 + rl_y) / 2, -90, col)
             sc.flow_arrow((fx + jx) / 2, jy, 180, col)
             sc.tag(jx + 1.0, jy - 2.4, "jacket in", size=4.0, ha="left")
+            if "coolant_hp" in line_labels:
+                sc.tag((fx + jx) / 2 + 2.0, jy + 2.4,
+                       line_labels["coolant_hp"], size=3.6, color=col)
             # jacket inlet manifold pressure on the vertical run
             sc.instrument(fx - 8.5, 12.5, "PT", tap=(fx, 12.5),
                           tag=find_tag("engine", "manifold inlet"))
@@ -647,6 +664,10 @@ def draw_pid(rec, path: str) -> str:
                   tag=find_tag("engine", "chamber pressure"))
     sc.instrument(cs[0] - 8.0, cs[1] - 6.0, "IGN",
                   tap=(cs[0], cs[1] - 4.0), tag=None)
+
+    if "pressurant" in line_labels:
+        sc.tag(x_mid + 9.0, hdr_y + 1.9, line_labels["pressurant"],
+               size=3.6, ha="left", color=C_PRESS)
 
     # ------------------------------------------------ legend & frame
     sc.legend(2.0, sc.H - 2.0)

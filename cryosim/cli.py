@@ -250,12 +250,98 @@ def run_pid(cfg: dict, outdir: str) -> None:
             regen_cooled=bool(fs.get("regen_cooled", True)),
         )
     rec = recommend_feed_system(fcfg)
+
+    # ---- automatic line sizing + fitting selection (needs engine + burn)
+    line_labels, specs = {}, None
+    if "engine" in cfg and "burn" in cfg:
+        specs, line_labels = _size_lines(cfg, fcfg)
+
     txt_path = os.path.join(outdir, "feed_system.txt")
     with open(txt_path, "w") as fh:
         fh.write(rec.as_text() + "\n")
-    draw_pid(rec, os.path.join(outdir, "feed_system_pid.svg"))
+        if specs:
+            from .line_sizing import report
+
+            fh.write("\n\n" + report(specs) + "\n")
+    draw_pid(rec, os.path.join(outdir, "feed_system_pid.svg"),
+             line_labels=line_labels)
+    written = [txt_path, f"{outdir}/feed_system_pid.svg"]
+    if specs:
+        from .fitting_diagrams import draw_fittings
+
+        draw_fittings(specs, os.path.join(outdir, "fittings.png"))
+        written.append(f"{outdir}/fittings.png")
     print(rec.as_text())
-    print(f"\nwritten: {txt_path}, {outdir}/feed_system_pid.svg")
+    if specs:
+        from .line_sizing import report
+
+        print("\n" + report(specs))
+    print(f"\nwritten: {', '.join(written)}")
+
+
+def _size_lines(cfg: dict, fcfg) -> tuple[list, dict]:
+    """Size the feed lines from the sim config (heuristic MAWPs, see
+    line_sizing docstring)."""
+    from .fluids import Fluid
+    from .line_sizing import size_feed_system
+
+    engine = build_engine(cfg)
+    burn = cfg.get("burn", {})
+    pc_spec = burn.get("pc", 20e5)
+    pc = float(pc_spec) if isinstance(pc_spec, (int, float)) else \
+        max(float(v) for _, v in pc_spec)
+    mdot_tot = engine.mdot_total(pc)
+    mr = engine.mixture_ratio
+    mdot_f = mdot_tot / (1.0 + mr)
+    mdot_ox = mdot_tot - mdot_f
+
+    ox_name = next((t.name for t in fcfg.tanks if t.oxidizer), "LOX")
+    fuel_name = next((t.name for t in fcfg.tanks if not t.oxidizer),
+                     cfg.get("fluid", "LCH4"))
+
+    init_p = float(cfg.get("initial", {}).get("pressure", 3e5))
+    setp = cfg.get("tank", {}).get("thermal", {}).get("pressurant_setpoint")
+    tank_p = max(init_p, float(setp) if setp else 0.0)
+    tank_meop = 1.5 * tank_p  # relief margin heuristic, documented
+
+    pump_dp = float(cfg.get("coupled", {}).get("pump_dp", 0.0))
+    pump_fed = fcfg.pressurization == "pump" or pump_dp > 0
+    coolant_hp_mawp = 1.5 * (tank_p + pump_dp) if pump_fed else None
+
+    # pressurant density at line conditions; He for regulated, else
+    # autogenous fuel vapor
+    if fcfg.pressurization == "regulated":
+        rho_press = tank_p * 0.004 / (8.314 * 288.0)
+    else:
+        try:
+            rho_press = Fluid(fuel_name).state_TP(250.0, tank_p).rho
+        except Exception:
+            rho_press = 3.0
+    rho_ox = Fluid(ox_name).sat_liquid(max(tank_p, 1.2e5)).rho
+    rho_f = Fluid(fuel_name).sat_liquid(max(tank_p, 1.2e5)).rho
+    mdot_press = (mdot_ox / rho_ox + mdot_f / rho_f) * rho_press
+
+    specs = size_feed_system(
+        fluid_names={"oxidizer": ox_name, "fuel": fuel_name},
+        mdots={"oxidizer": mdot_ox, "fuel": mdot_f,
+               "pressurant": mdot_press},
+        tank_meop=tank_meop,
+        coolant_hp_mawp=coolant_hp_mawp,
+        pressurant_rho=rho_press,
+        liquid_rhos={"oxidizer": rho_ox, "fuel": rho_f},
+        pump_fed=pump_fed,
+    )
+    labels = {}
+    for s in specs:
+        if s.name == f"{ox_name} feed line":
+            labels["oxidizer"] = s.label()
+        elif s.name == f"{fuel_name} feed line":
+            labels["fuel"] = s.label()
+        elif s.name == "pressurant header":
+            labels["pressurant"] = s.label()
+        elif s.name.startswith("coolant HP"):
+            labels["coolant_hp"] = s.label()
+    return specs, labels
 
 
 def main(argv=None) -> None:

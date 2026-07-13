@@ -29,6 +29,21 @@ couples, over a user-specified burn/flight profile:
    header with per-tank check valves, feed trains, regen coolant loop to
    the injector), a described symbol legend, fluid-colored line key, and a
    title block — plus the component list with one-line rationales.
+   The `pid` command also performs **automatic line sizing and fitting
+   selection** (`cryosim/line_sizing.py`): each line (feed, fill/drain,
+   vent/relief, pressurant header, pump-discharge coolant run) gets the
+   smallest standard tube (1/8"–2" OD, standard walls) meeting a
+   per-service velocity target (liquid ~5 m/s, pump suction 3 m/s,
+   discharge 8 m/s, gas 25 m/s, vent 50 m/s — Huzel & Huang ch. 8 practice)
+   with the wall from Barlow's formula against the material allowable
+   stress (ASME B31.3-style, ×1.25 design factor, 0.028" minimum handling
+   wall), reporting velocity, AN dash size, and friction Δp/m. Fitting
+   types follow cryo/pressure rules (37° flare or orbital weld for cryo —
+   NPT rejected; twin-ferrule for ambient gas; weld/flange ≥1" OD) and a
+   **fitting cross-section diagram sheet** (`fittings.png`) is generated
+   with the sized-line table; tube specs are annotated on the P&ID runs.
+   Sizing heuristics and their limits (no surge/water-hammer or bend
+   analysis) are documented in the module docstring and the output itself.
 
 **Design choice, stated up front: there is no CFD anywhere in this tool —
 by design.** Every sub-model is the fast, analytical/empirical reduced-order

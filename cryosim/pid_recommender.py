@@ -295,12 +295,15 @@ def select_optimal_architecture(
                             regen_cooled=True), rationale
 
 
-def draw_pid(rec: FeedSystemRecommendation, path: str) -> str:
+def draw_pid(rec: FeedSystemRecommendation, path: str,
+             line_labels: dict | None = None) -> str:
     """Render the recommendation as an ISA-5.1-flavored schematic with drawn
     valve/instrument symbols, routed lines, legend, and title block.
+    ``line_labels`` (from :mod:`cryosim.line_sizing`) annotates the main
+    runs with the selected tube specs.
 
     Implementation lives in :mod:`cryosim.pid_drawing`.
     """
     from .pid_drawing import draw_pid as _draw
 
-    return _draw(rec, path)
+    return _draw(rec, path, line_labels=line_labels)

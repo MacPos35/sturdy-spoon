@@ -16,9 +16,11 @@ this module selects:
   for ambient-temperature gas and instrumentation lines, welded/flanged
   above 1" OD.
 
-Velocity targets follow common liquid-rocket feed practice (Huzel & Huang
-ch. 8: feed lines of order a few m/s to limit dynamic head and water-hammer;
-gas lines tens of m/s):
+Velocity targets follow common feed-system practice: the 5 m/s liquid
+target is the widely used LOX line threshold (limits dynamic head,
+water-hammer severity, and particle-impact ignition energy); the pump
+suction target sits at the top of the Hydraulic Institute's 0.5-2.5
+(max ~3) m/s suction band; gas lines run tens of m/s:
 
 ===================  =================
 service              target velocity
@@ -59,11 +61,16 @@ TUBE_WALLS_IN = [0.028, 0.035, 0.049, 0.065, 0.083, 0.095, 0.120]
 
 #: Allowable stress [Pa] (ASME B31.3-style room-temperature values) and
 #: cryogenic suitability.
+#: 316L: 115 MPa = 16.7 ksi (2/3 of the 25 ksi L-grade minimum yield, the
+#: B31.3 Table A-1 basis). AL6061T6: 65 MPa is the WELDED-condition class
+#: deliberately used here (rocket assemblies get welded bosses/joints);
+#: B31.3 lists 96.5 MPa (14 ksi) for unwelded ASTM B210 seamless tube —
+#: raise it only if every joint on the line is mechanical.
 MATERIALS = {
     "316L": {"S_allow": 115e6, "cryo_ok": True,
              "note": "austenitic SS, tough at cryo"},
     "AL6061T6": {"S_allow": 65e6, "cryo_ok": True,
-                 "note": "verify welded-zone knockdown"},
+                 "note": "welded-condition allowable; 96.5 MPa if unwelded"},
     "PTFE-lined flex": {"S_allow": None, "cryo_ok": False,
                         "note": "per-hose rating"},
 }

@@ -83,3 +83,16 @@ def test_resonant_magnification():
     hist = simulate_first_mode(lambda t: p, a_lat, (0.0, 120 * T), n_out=12000)
     steady = np.abs(hist.displacement[-2000:]).max()
     assert steady == pytest.approx(a0 / (2 * 0.02 * w**2), rel=0.03)
+
+
+@pytest.mark.validation
+def test_slosh_mass_matches_published_1_over_2p2_form():
+    """Literature cross-check: the widely printed first-mode slosh mass
+    m1 = m_F (R/2.2h) tanh(1.84 h/R)  is algebraically our
+    2 tanh(xi h/R) / ((h/R) xi (xi^2-1)) with xi = 1.8412:
+    the coefficient 2/(xi(xi^2-1)) equals 1/2.2 to 4 significant figures."""
+    xi = 1.8412
+    assert 2.0 / (xi * (xi**2 - 1.0)) == pytest.approx(1.0 / 2.2, rel=2e-4)
+    p = slosh_parameters(1000.0, 1e-6, R=0.3, h=0.45, accel=G)
+    m_published = p.m_liquid * (0.3 / (2.2 * 0.45)) * np.tanh(1.84 * 0.45 / 0.3)
+    assert p.first.mass == pytest.approx(m_published, rel=2e-3)

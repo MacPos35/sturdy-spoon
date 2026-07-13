@@ -191,10 +191,10 @@ def optimize_channels(
     best = (np.inf, None, None, None)
     for x in samples:
         J, ch, res = evaluate(x)
-        if J < best[0]:
+        if res is not None and J < best[0]:
             best = (J, x.copy(), ch, res)
 
-    if best[1] is None:
+    if best[2] is None or best[3] is None:
         raise RuntimeError("no feasible channel design found in the sampled "
                            "space; relax bounds or dp budget")
 
@@ -208,7 +208,7 @@ def optimize_channels(
                             "fatol": 0.5})
     x_fin = np.clip(sol.x, lo, hi)
     J_fin, ch_fin, res_fin = evaluate(x_fin)
-    if J_fin > best[0]:
+    if res_fin is None or J_fin > best[0]:
         J_fin, x_fin, ch_fin, res_fin = best
 
     base_metrics = None

@@ -1,7 +1,7 @@
 # Results gallery — what goes in, what comes out
 
-Everything below was produced by running the seven `cryosim` commands on the
-two shipped example configs. Full console logs live next to the images in
+Everything below was produced by running the eight `cryosim` commands on the
+three shipped example configs. Full console logs live next to the images in
 [`docs/results/`](results/). Regenerate any of it with the commands shown.
 
 ---
@@ -134,7 +134,35 @@ cryosim optimize examples/lch4_coupled_burn.yaml
 
 ![optimized channel design](results/optimized_regen_axial.png)
 
-## 8 — Computed vs literature values
+## 8 — Autonomous engine design (requirements → printable hardware)
+
+The LEAP 71 Noyron-inspired pipeline: the input is
+[`examples/engine_5kn_methalox.yaml`](../examples/engine_5kn_methalox.yaml) —
+**top-level requirements only** (5 kN, LOX/CH4, 20 bar, sea level, LPBF).
+Deterministic encoded rules derive everything else and record every
+decision ([console log](results/console_design.txt)):
+
+```
+cryosim design examples/engine_5kn_methalox.yaml -o output/engine
+→ Dt 48 mm, ε 3.9, Isp 243 s SL / 277 s vac, mdot 2.10 kg/s
+→ cooling channels sized under the LPBF land floor, peak wall < 800 K
+→ 3-element coax-swirl injector fed the 500+ K supercritical regen outlet
+→ torus manifolds, closeout hoop sizing, 7/7 ledger constraints PASS
+→ watertight STLs: chamber_jacket / injector_head / engine_assembly
+```
+
+![engine cross-section](results/design_cross_section.png)
+
+![injector face layout](results/design_injector_face.png)
+
+![designed engine 3D render](results/design_render.png)
+
+The full explainable decision record (`trace.md`) and performance report
+(`report.md`) are generated next to the STLs. The "AI" is deterministic
+engineering logic — two runs of the same spec produce byte-identical
+designs (there's a regression test for that).
+
+## 9 — Computed vs literature values
 
 ```
 cryosim benchmark --full

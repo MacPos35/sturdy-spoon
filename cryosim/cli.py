@@ -511,6 +511,32 @@ def run_cfd(cfg: dict, outdir: str) -> None:
     print(f"written: {outdir}/cfd_nozzle.png")
 
 
+def run_design(args) -> None:
+    """Autonomous requirements-to-engine design (see engine_design.py)."""
+    from .design_report import generate_package
+    from .engine_design import DesignError, EngineSpec, design_engine
+
+    spec = EngineSpec.from_yaml(args.config)
+    print(f"designing '{spec.name}': {spec.thrust/1e3:.1f} kN "
+          f"{spec.propellants} at Pc {spec.chamber_pressure/1e5:.0f} bar "
+          "(deterministic encoded-rule pipeline — full trace below)")
+    n = 20 if args.fast else 40
+    try:
+        design = design_engine(spec, n_random=n, n_polish=n, verbose=True)
+    except DesignError as e:
+        raise SystemExit(f"DESIGN FAILED\n{e}") from None
+    print()
+    print(design.describe())
+    print()
+    paths = generate_package(
+        design, args.outdir, voxel_jacket_mm=args.voxel_jacket,
+        voxel_injector_mm=args.voxel_injector,
+        with_geometry=not args.no_geometry, verbose=True)
+    print("\nwritten:")
+    for name, p in paths.items():
+        print(f"  {name:16s} {p}")
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(
         prog="cryosim",
@@ -535,7 +561,25 @@ def main(argv=None) -> None:
     pb.add_argument("-o", "--outdir", default="output")
     pb.add_argument("--full", action="store_true",
                     help="add model-level solves (regen/CFD/K-site; slower)")
+    pd = sub.add_parser(
+        "design",
+        help="autonomous requirements-to-engine design: contour, cooling, "
+             "injector, manifolds + 3D-printable STLs (Noyron-style)")
+    pd.add_argument("config", help="engine requirements YAML")
+    pd.add_argument("-o", "--outdir", default="output")
+    pd.add_argument("--voxel-jacket", type=float, default=0.5,
+                    help="chamber-jacket voxel size [mm] (default 0.5)")
+    pd.add_argument("--voxel-injector", type=float, default=0.3,
+                    help="injector-head voxel size [mm] (default 0.3)")
+    pd.add_argument("--no-geometry", action="store_true",
+                    help="skip STL meshing (design + report only)")
+    pd.add_argument("--fast", action="store_true",
+                    help="smaller channel search for a quick look")
     args = ap.parse_args(argv)
+
+    if args.cmd == "design":
+        run_design(args)
+        return
 
     if args.cmd == "benchmark":
         from .benchmarks import run_benchmarks, to_markdown, to_text

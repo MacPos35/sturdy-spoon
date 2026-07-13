@@ -139,18 +139,25 @@ def optimize_channels(
     w_dp: float = 20.0 / 1e5,     # K of penalty per Pa over budget (20 K/bar)
     seed: int = 1,
     baseline: CoolingChannels | None = None,
+    min_land: float | None = None,
 ) -> ChannelDesignResult:
     """Find the channel layout minimizing peak wall temperature.
 
     ``n_random`` scouting samples + up to ``n_polish`` Nelder-Mead
     evaluations; every evaluation is a full regen solve, so the total
     runtime is roughly (n_random + n_polish) x one solve.
+
+    ``min_land``: minimum land (rib) width at the throat treated as a hard
+    search constraint. Defaults to the 0.15 mm existence floor (below which
+    the jacket has no ribs at all); pass a manufacturing-process floor to
+    exclude unprintable layouts from the search instead of only warning.
     """
     b = dict(DEFAULT_BOUNDS)
     b.update(bounds or {})
     rng = np.random.default_rng(seed)
     evals = [0]
-    min_land = 0.15e-3  # hard floor: below this the jacket doesn't exist
+    # hard floor: below 0.15 mm the jacket doesn't exist as a structure
+    min_land = max(0.15e-3, min_land or 0.0)
 
     def build(x) -> CoolingChannels | None:
         n, w, h, t = int(round(x[0])), x[1], x[2], x[3]

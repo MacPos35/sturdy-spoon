@@ -1,0 +1,25 @@
+# Autonomous engine design — top-level requirements ONLY.
+# Everything else (contour, cooling channels, injector, manifolds,
+# closeout) is derived by the encoded design rules; run:
+#
+#   cryosim design examples/engine_5kn_methalox.yaml -o output/engine
+#
+# and read output/engine/trace.md for every decision that was made.
+# Matches the scale of the shipped coupled-burn demo (5 kN LOX/LCH4)
+# so the numbers can be cross-checked against it.
+
+name: demo-5kN-methalox
+thrust: 5.0e3                # N, at the design ambient below
+propellants: lox/ch4         # preset; supply combustion_gas for CEA values
+chamber_pressure: 2.0e6      # Pa (20 bar)
+ambient_pressure: 101325.0   # Pa — sea-level design (0 for vacuum)
+
+# --- optional overrides (defaults shown by `trace.md` when omitted) ---
+# of_ratio: 3.2
+# combustion_gas: {T_c: 3430.0, gamma: 1.14, molar_mass: 21.3e-3}
+liner: cucrzr                # cucrzr | grcop-42 | inconel718
+closeout_material: 316L
+process: lpbf                # lpbf | machined (sets feature-size floors)
+dp_budget: 3.0e6             # Pa, jacket pressure-drop budget
+stiffness: 0.20              # injector dP / Pc
+film_fraction: 0.10          # share of fuel to the wall film ring

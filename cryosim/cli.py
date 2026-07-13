@@ -530,7 +530,24 @@ def main(argv=None) -> None:
         p.add_argument("config", help="YAML configuration file")
         p.add_argument("-o", "--outdir", default="output",
                        help="output directory (default: output/)")
+    pb = sub.add_parser("benchmark",
+                        help="computed vs literature/reference value table")
+    pb.add_argument("-o", "--outdir", default="output")
+    pb.add_argument("--full", action="store_true",
+                    help="add model-level solves (regen/CFD/K-site; slower)")
     args = ap.parse_args(argv)
+
+    if args.cmd == "benchmark":
+        from .benchmarks import run_benchmarks, to_markdown, to_text
+
+        os.makedirs(args.outdir, exist_ok=True)
+        rows = run_benchmarks(full=args.full)
+        print(to_text(rows))
+        path = os.path.join(args.outdir, "benchmarks.md")
+        with open(path, "w") as fh:
+            fh.write(to_markdown(rows) + "\n")
+        print(f"\nwritten: {path}")
+        return
 
     with open(args.config) as fh:
         cfg = yaml.safe_load(fh)

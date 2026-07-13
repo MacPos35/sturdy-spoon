@@ -134,6 +134,16 @@ cryosim optimize examples/lch4_coupled_burn.yaml
 
 ![optimized channel design](results/optimized_regen_axial.png)
 
+## 8 — Computed vs literature values
+
+```
+cryosim benchmark --full
+→ 22/22 within tolerance/band
+```
+
+Every computed number next to its NIST / handbook / experiment-band
+reference, with source and deviation: **[benchmarks.md](results/benchmarks.md)**.
+
 ---
 
 *Every number above regenerates deterministically from the configs; see the

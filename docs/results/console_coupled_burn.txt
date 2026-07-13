@@ -1,0 +1,4 @@
+running coupled burn: 20.0 s ...
+done: 80 steps -> /tmp/tmp.AEyhk5gNdP/burn/
+  fill 90% -> 76%, ullage P 3.00 bar
+  injector inlet T 541-542 K, peak wall 1015 K, min injector margin 32.6 bar

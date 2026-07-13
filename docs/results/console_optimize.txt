@@ -1,0 +1,16 @@
+optimizing channel design (this runs many regen solves)...
+Optimized cooling-channel design (physics optimum — check manufacturability warnings)
+========================================================================
+  channels        : 220
+  width x height  : 0.30 x 2.07 mm
+  hot-wall thick. : 0.59 mm
+  land at throat  : 0.26 mm
+  peak T_wg       : 711 K
+  jacket dP       : 17.9 bar
+  coolant outlet  : 599 K
+  regen solves    : 53
+  vs baseline     : peak T_wg 1014 -> 711 K, dP 20.9 -> 17.9 bar
+  manufacturability:
+    ! channel width < 0.8 mm: needs micro-milling/wire-EDM slots or additive manufacturing
+    ! land < 0.8 mm at the throat: fin buckling and braze/bond area become critical
+written: /tmp/tmp.AEyhk5gNdP/opt/optimized_channels.txt, /tmp/tmp.AEyhk5gNdP/opt/optimized_regen_axial.png

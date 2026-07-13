@@ -1,0 +1,88 @@
+selected architecture: pump
+  - required coolant feed pressure ~61 bar exceeds 85% of LCH4's critical pressure (46 bar): a saturated-ullage cryo tank cannot be pressure-fed that high, and subcritical heated coolant would boil in the jacket -> electric pump on the coolant line, tank held at a low autogenous pad (2-4 bar)
+  - autogenous tank pad is a natural upgrade here: the regen outlet already provides warm vapor of the same species (see the 'autogenous' scheme for that variant)
+Feed system recommendation — pressurization: pump
+==================================================================
+
+[engine]
+  PU-001   Electric feed pump (coolant side)
+           - raises channel pressure above the propellant critical pressure (supercritical cooling, avoids two-phase flow in the jacket)
+  PT-020   Coolant manifold inlet pressure transducer
+           - confirms jacket inlet pressure (supercritical margin / injector stiffness)
+  TC-021   Coolant outlet temperature sensor
+           - the regen outlet state IS the injector inlet state — monitors heat pickup and coking/decomposition margin
+  RV-022   Coolant-jacket relief path
+           - protects trapped coolant volume between valves against heat-soak overpressure after shutdown
+  PT-023   Chamber pressure transducer
+           - primary performance and abort parameter
+  IGN-024  Igniter (with its own isolation)
+           - bi-propellant engines are not hypergolic — positive ignition source with independent control
+
+[pressurant]
+  QD-002   Low-pressure ullage pad charge port
+           - pump-fed tanks still need a small ullage pad (1-4 bar) for pump NPSH and structural stability
+
+[LOX]
+  FDV-003  LOX fill/drain valve (cryo-rated)
+           - ground fill and safe de-tanking path; cryo service needs cold-rated seats/seals
+  VV-004   LOX remote vent valve
+           - boil-off management during hold; venting is the primary abort/safe action for a cryogenic tank
+  RV-005   LOX relief valve
+           - primary overpressure protection sized for the worst-case heating (self-pressurization) rate
+  BD-006   LOX burst disc
+           - redundant, non-reclosing overpressure protection in parallel with the relief valve (standard practice for flight tanks)
+  PT-007   LOX tank pressure transducer
+           - ullage pressure: feed margin monitoring + abort criteria
+  TC-008   LOX tank temperature sensors (2x)
+           - bulk liquid + ullage temperature: fill level inference and stratification/boil-off monitoring
+  FLT-009  LOX feed-line filter
+           - protects injector orifices and valve seats from debris
+  MV-010   LOX main valve (remote, fast-acting)
+           - engine start/stop; abort isolation of the propellant supply
+  PGV-011  LOX line purge check valve (inert gas)
+           - pre-ignition inerting and post-fire clearing of the oxidizer line (fire safety)
+
+[LCH4]
+  FDV-012  LCH4 fill/drain valve (cryo-rated)
+           - ground fill and safe de-tanking path; cryo service needs cold-rated seats/seals
+  VV-013   LCH4 remote vent valve
+           - boil-off management during hold; venting is the primary abort/safe action for a cryogenic tank
+  RV-014   LCH4 relief valve
+           - primary overpressure protection sized for the worst-case heating (self-pressurization) rate
+  BD-015   LCH4 burst disc
+           - redundant, non-reclosing overpressure protection in parallel with the relief valve (standard practice for flight tanks)
+  PT-016   LCH4 tank pressure transducer
+           - ullage pressure: feed margin monitoring + abort criteria
+  TC-017   LCH4 tank temperature sensors (2x)
+           - bulk liquid + ullage temperature: fill level inference and stratification/boil-off monitoring
+  FLT-018  LCH4 feed-line filter
+           - protects injector orifices and valve seats from debris
+  MV-019   LCH4 main valve (remote, fast-acting)
+           - engine start/stop; abort isolation of the propellant supply
+
+Warnings:
+  ! pump-fed: verify pump NPSH against tank pressure minus vapor pressure at the warmest expected bulk temperature
+
+Note: checklist aid only — NOT a safety-reviewed P&ID.
+
+Line sizing (velocity targets + Barlow wall, see docstring for assumptions)
+========================================================================
+LOX feed line: 1" OD x 0.028" wall 316L tube (ID 24.0 mm, dash -16) | LOX, 1446 g/s -> 3.0 m/s | MAWP 4 bar | dp 2.84 bar/100m | fittings: butt-welded joints / bolted flanges
+    note: above ~1" OD, flare/compression torque becomes impractical - weld and flange
+LOX fill/drain line: 0.625" OD x 0.028" wall 316L tube (ID 14.5 mm, dash -10) | LOX, 723 g/s -> 4.1 m/s | MAWP 4 bar | dp 9.42 bar/100m | fittings: 37 deg flare (AN/MS) or orbital-welded joints
+    note: NPT tapered threads are rejected for cryogenic service (leak on thermal cycling)
+LOX vent/relief line: 0.5" OD x 0.028" wall 316L tube (ID 11.3 mm, dash -8) | LOX vapor, 10 g/s -> 42.8 m/s | MAWP 4 bar | dp 6.93 bar/100m | fittings: 37 deg flare (AN/MS) or orbital-welded joints
+    note: NPT tapered threads are rejected for cryogenic service (leak on thermal cycling)
+LCH4 feed line: 1" OD x 0.028" wall 316L tube (ID 24.0 mm, dash -16) | LCH4, 425 g/s -> 2.4 m/s | MAWP 4 bar | dp 0.82 bar/100m | fittings: butt-welded joints / bolted flanges
+    note: above ~1" OD, flare/compression torque becomes impractical - weld and flange
+LCH4 fill/drain line: 0.625" OD x 0.028" wall 316L tube (ID 14.5 mm, dash -10) | LCH4, 213 g/s -> 3.2 m/s | MAWP 4 bar | dp 2.70 bar/100m | fittings: 37 deg flare (AN/MS) or orbital-welded joints
+    note: NPT tapered threads are rejected for cryogenic service (leak on thermal cycling)
+LCH4 vent/relief line: 0.5" OD x 0.028" wall 316L tube (ID 11.3 mm, dash -8) | LCH4 vapor, 10 g/s -> 42.8 m/s | MAWP 4 bar | dp 6.93 bar/100m | fittings: 37 deg flare (AN/MS) or orbital-welded joints
+    note: NPT tapered threads are rejected for cryogenic service (leak on thermal cycling)
+pressurant header: 0.5" OD x 0.028" wall 316L tube (ID 11.3 mm, dash -8) | pressurant, 6 g/s -> 24.1 m/s | MAWP 4 bar | dp 2.62 bar/100m | fittings: twin-ferrule compression (rated) or 37 deg flare
+coolant HP line (pump -> jacket): 0.625" OD x 0.049" wall 316L tube (ID 13.4 mm, dash -10) | LCH4, 425 g/s -> 7.6 m/s | MAWP 135 bar | dp 13.88 bar/100m | fittings: 37 deg flare (AN/MS) or orbital-welded joints
+    note: NPT tapered threads are rejected for cryogenic service (leak on thermal cycling)
+
+Sizing is a starting point; verify surge/water-hammer, bend thinning and vendor pressure ratings before ordering.
+
+written: /tmp/tmp.AEyhk5gNdP/pid/feed_system.txt, /tmp/tmp.AEyhk5gNdP/pid/feed_system_pid.svg, /tmp/tmp.AEyhk5gNdP/pid/fittings.png

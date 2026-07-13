@@ -1,0 +1,5 @@
+running axisymmetric Euler solver (inviscid — flow-field check only, no wall heat transfer)...
+mass flow: CFD 1.928 kg/s vs quasi-1D 1.872 kg/s (+3.0%)
+exit Mach: CFD centerline 2.41 vs quasi-1D 2.60
+note: residual not fully converged — treat as qualitative; raise max_iter/refine grid for quantitative use
+written: /tmp/tmp.AEyhk5gNdP/cfd/cfd_nozzle.png

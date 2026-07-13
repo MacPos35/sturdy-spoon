@@ -1,0 +1,22 @@
+solving the jacket to get channel dp and outlet state...
+Automatic torus-manifold design (1D header theory — see module docstring for sources/limits)
+========================================================================
+  channel bank      : dp_channel = 20.9 bar
+  flow uniformity   : (max-min)/mean = 1.09%  (target 3.0%)
+  port clocking     : outlet ports rotated 0 deg from inlet feeders
+  inlet manifold (nozzle end, dividing):
+    duct ID x wall  : 6.5 x 0.90 mm 316L
+    feeders         : 1
+    torus R (attach): 45.7 (42.4) mm
+    peak velocity   : 15.2 m/s (head ratio 2.3% of dp_ch)
+    shell mass      : 42 g
+  outlet manifold (injector end, combining):
+    duct ID x wall  : 19.5 x 1.57 mm 316L
+    feeders         : 1
+    torus R (attach): 58.4 (48.6) mm
+    peak velocity   : 29.2 m/s (head ratio 0.5% of dp_ch)
+    shell mass      : 282 g
+  inlet feeder line : 0.625" x 0.049" per feeder
+  outlet line       : 1.5" x 0.120"
+  NOTE: smooth-shell sizing only; bosses, welds and channel cutouts need their own stress analysis.
+written: /tmp/tmp.AEyhk5gNdP/man/manifold_design.txt, /tmp/tmp.AEyhk5gNdP/man/manifolds.png

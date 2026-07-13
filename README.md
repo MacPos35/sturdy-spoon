@@ -71,6 +71,16 @@ Beyond the core coupled simulation, three design-study tools are included:
 * **`cryosim cfd`** — the Euler flow-field check described above (first-
   order Rusanov scheme; on the demo contour: mass flow within ~3% of
   quasi-1D, exit Mach −7%, both shrinking under grid refinement).
+* **`cryosim manifold`** — automatic design of the jacket's torus
+  manifolds: the inlet (dividing) and outlet (combining) headers are
+  marched with classical 1D manifold theory (momentum regain + friction;
+  Bajura & Jones 1976 / Shah & Sekulić ch. 12), the duct diameters are the
+  smallest meeting a channel-flow uniformity target under a 30 m/s header
+  velocity cap, feeder count and inlet/outlet port clocking are chosen
+  automatically, and walls are sized with the toroidal-shell inner-crotch
+  stress factor. Motivated by the measured effect of manifolds on LOX/CH4
+  regen wall temperatures (J. Thermal Science 29, 2020). Smooth-shell
+  sizing only — bosses/welds/cutouts need separate stress analysis.
 * **`cryosim gimbal`** — automatic TVC stabilization of an imaginary rigid
   rocket **including the slosh pendulum** from the slosh model: a PD
   attitude controller auto-tuned by pole placement on the vehicle's own
@@ -203,6 +213,7 @@ numbers.
 | Channel optimizer | NASA HARCC demonstration (Wadel & Meyer, AIAA 96-2584) | Optimizer independently converges on the high-aspect-ratio channel configuration known experimentally to cut wall temperature and Δp | **Concept-anchored** (the optimum's *character* matches the published result; magnitudes inherit the regen model's validation status) |
 | Euler CFD | Quasi-1D isentropic theory (exact for smooth C-D nozzles; Anderson ch. 5) | Mass-flow bias ≤ ~3%, exit Mach ≤ ~7% low, both shrinking under refinement (first-order scheme); transonic at the geometric throat; mass conservation along the duct | **Verified vs the 1D exact reference**; inviscid — NOT validated (or usable) for heat transfer |
 | Gimbal/TVC | Linear control theory + slosh-vehicle equations (SP-8009 ch. 4 / Dodge 2000 ch. 5 formulation) | Closed-loop eigen-structure (slosh pair at ω_s, pole placement at requested bandwidth), gust recovery, gain scaling with inertia | **Verified vs linear theory**; no experimental TVC dataset used — no aero, planar, rigid body |
+| Manifold design | Bajura & Jones (1976) header theory; toroidal-shell membrane stress (Roark) | Dividing/combining pressure-profile shapes and symmetry, uniformity improving with duct area and channel stiffness (the literature's area-ratio trend), torus wall → cylinder limit as R/r → ∞ | **Verified vs the classical theory's trends**; k_m = 0.7 is the literature mid-range, not calibrated to a rocket dataset |
 
 ## Assumptions & limitations (per module)
 

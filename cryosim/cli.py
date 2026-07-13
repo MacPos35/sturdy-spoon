@@ -451,6 +451,39 @@ def run_gimbal(cfg: dict, outdir: str) -> None:
     print(f"written: {outdir}/gimbal.png")
 
 
+def run_manifold(cfg: dict, outdir: str) -> None:
+    """Automatic torus-manifold design for the configured jacket."""
+    from .manifold_design import design_manifolds, draw_manifolds
+
+    engine = build_engine(cfg)
+    fluid = Fluid(cfg.get("fluid", "LCH4"))
+    Pc = _pc_of(cfg)
+    mdot_cool = engine.mdot_total(Pc) * engine.coolant_fraction
+    T_in, P_in = _coolant_inlet(cfg)
+    from .regen_model import RegenCoolingModel
+
+    print("solving the jacket to get channel dp and outlet state...")
+    res = RegenCoolingModel(engine.contour, engine.channels, engine.gas,
+                            fluid).solve(Pc, mdot_cool, T_in, P_in)
+    mc = cfg.get("manifold", {})
+    design = design_manifolds(
+        engine.contour, engine.channels, mdot_cool,
+        dp_channel=res.dP_total,
+        rho_in=res.coolant_inlet.rho, mu_in=res.coolant_inlet.mu,
+        rho_out=res.coolant_outlet.rho, mu_out=res.coolant_outlet.mu,
+        mawp=float(mc.get("mawp", 1.5 * P_in)),
+        coolant_name=cfg.get("fluid", "LCH4"),
+        target=float(mc.get("target_maldistribution", 0.03)),
+        max_feeders=int(mc.get("max_feeders", 2)),
+    )
+    print(design.report())
+    with open(os.path.join(outdir, "manifold_design.txt"), "w") as fh:
+        fh.write(design.report() + "\n")
+    draw_manifolds(design, engine.contour,
+                   os.path.join(outdir, "manifolds.png"))
+    print(f"written: {outdir}/manifold_design.txt, {outdir}/manifolds.png")
+
+
 def run_cfd(cfg: dict, outdir: str) -> None:
     """Inviscid Euler check of the quasi-1D nozzle-flow assumption."""
     from .cfd_nozzle import NozzleEulerCFD, plot_cfd
@@ -491,6 +524,7 @@ def main(argv=None) -> None:
         ("optimize", "max-performance cooling-channel design search"),
         ("gimbal", "slosh-coupled TVC stabilization study"),
         ("cfd", "axisymmetric Euler check of the quasi-1D assumption"),
+        ("manifold", "automatic torus-manifold design for the jacket"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("config", help="YAML configuration file")
@@ -510,6 +544,8 @@ def main(argv=None) -> None:
         run_gimbal(cfg, args.outdir)
     elif args.cmd == "cfd":
         run_cfd(cfg, args.outdir)
+    elif args.cmd == "manifold":
+        run_manifold(cfg, args.outdir)
     elif cfg.get("mode", "coupled") == "tank_only":
         run_tank_only(cfg, args.outdir)
     else:

@@ -89,3 +89,7 @@ cfd:                      # for `cryosim cfd` — inviscid Euler flow-field chec
   n_axial: 120
   n_radial: 24
   max_iter: 6000
+
+manifold:                 # for `cryosim manifold` — torus manifold auto-design
+  target_maldistribution: 0.03
+  max_feeders: 2

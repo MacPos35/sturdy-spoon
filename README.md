@@ -92,6 +92,9 @@ Beyond the core coupled simulation, three design-study tools are included:
 
 ---
 
+**On your phone?** The full input-to-output walkthrough with every plot
+is in [docs/RESULTS.md](docs/RESULTS.md) — GitHub renders it inline.
+
 ## Install & run
 
 ```bash

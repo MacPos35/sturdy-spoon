@@ -212,7 +212,6 @@ class NozzleEulerCFD:
     # ---------------------------------------------------------------- run
     def run(self, max_iter: int = 5000, cfl: float = 0.4,
             tol: float = 1e-4, log_every: int = 200) -> CFDResult:
-        N, M = self.N, self.M
         res_hist = []
         d_char = np.sqrt(self.area)          # cell length scale
         r_vol = np.maximum(self.rc, 1e-9) * self.area

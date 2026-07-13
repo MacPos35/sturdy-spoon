@@ -37,7 +37,6 @@ from cryosim.fluids import Fluid
 from cryosim.tank_geometry import TankGeometry
 from cryosim.thermal_model import (
     TankThermalModel,
-    TankThermalConfig,
     homogeneous_pressure_rise_rate,
     simulate_homogeneous,
 )

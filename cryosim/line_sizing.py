@@ -138,6 +138,11 @@ class LineSpec:
 def required_wall_in(mawp: float, od_in: float, material: str) -> float:
     """Barlow thin-wall thickness [in]: t = P*OD/(2*S), with design factor."""
     S = MATERIALS[material]["S_allow"]
+    if S is None:
+        raise ValueError(
+            f"{material} has no allowable stress in the catalog (rated "
+            "per-item, e.g. flex hose) - size it from the vendor rating"
+        )
     t_req_m = DESIGN_FACTOR * mawp * (od_in * IN) / (2.0 * S)
     return max(t_req_m / IN, MIN_WALL_IN)
 

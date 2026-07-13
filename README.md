@@ -207,7 +207,12 @@ numbers.
 ## Assumptions & limitations (per module)
 
 * **Global**: axisymmetric rigid tanks; single-species tank fluid (no helium
-  pressurant — an autogenous setpoint mode is provided instead); no CFD.
+  pressurant — an autogenous setpoint mode is provided instead; injected
+  pressurant is treated as an *external* mass/energy source, i.e. it is not
+  deducted from the injector flow, so system mass is not closed while it
+  operates); no viscous/turbulent CFD (the included Euler solver is
+  flow-field verification only). Deep blowdown below the liquid's vapor
+  pressure would flash-boil — not modeled.
 * **Slosh**: linear small-amplitude lateral slosh only — no swirl/rotary or
   breaking-wave regimes, no baffle model (pass your own damping ratio),
   large Bond number assumed, analog degraded when the surface is in a dome.

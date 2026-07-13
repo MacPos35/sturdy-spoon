@@ -144,7 +144,6 @@ class CoupledSimulator:
         slosh_model: SloshModel,
         engine: Engine,
         config: CoupledConfig | None = None,
-        n_regen_points: int = 100,
     ):
         self.fluid = fluid
         self.tank = tank
@@ -213,6 +212,9 @@ class CoupledSimulator:
             # --- regen quasi-steady solve at the current tank outlet state
             if Pc > 0 and (t - last_regen_t) >= cfg.regen_interval - 1e-9:
                 P_inlet = P_u + rho_l * accel * h_fill - cfg.feed_dp + cfg.pump_dp
+                # the 1.2*Pc floor keeps the marched solve well-posed when the
+                # feed pressure is infeasible; true feasibility is reported
+                # through hist.injector_margin, not hidden
                 regen_res = self.regen.solve(
                     Pc, mdot_cool, T_inlet=float(T_b),
                     P_inlet=float(max(P_inlet, 1.2 * Pc)),

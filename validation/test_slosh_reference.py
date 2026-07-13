@@ -24,7 +24,6 @@ import numpy as np
 import pytest
 
 from cryosim.slosh_model import (
-    XI_N,
     mikishev_dorozhkin_zeta,
     simulate_first_mode,
     slosh_parameters,

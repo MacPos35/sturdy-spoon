@@ -6,7 +6,6 @@ import pytest
 
 from cryosim.line_sizing import (
     IN,
-    LineSpec,
     required_wall_in,
     select_fitting,
     size_feed_system,
@@ -129,3 +128,8 @@ def test_pid_accepts_line_labels(demo_specs, tmp_path):
               "coolant_hp": "z"}
     out = draw_pid(rec, str(tmp_path / "pid.png"), line_labels=labels)
     assert os.path.getsize(out) > 20000
+
+
+def test_unrated_material_gives_clear_error():
+    with pytest.raises(ValueError, match="vendor rating"):
+        required_wall_in(10e5, 0.5, "PTFE-lined flex")

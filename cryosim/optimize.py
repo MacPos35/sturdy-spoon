@@ -173,7 +173,8 @@ def optimize_channels(
             res = model.solve(Pc, mdot_coolant, T_inlet, P_inlet)
         except Exception:
             return 1e6, ch, None
-        if res.boiling_detected or res.coolant_outlet.P < 0.3 * P_inlet:
+        if (res.boiling_detected or res.pressure_collapsed
+                or res.coolant_outlet.P < 0.3 * P_inlet):
             return 5e5 + res.peak_wall_temperature, ch, res
         J = res.peak_wall_temperature + w_dp * max(0.0, res.dP_total - dp_budget)
         return J, ch, res

@@ -121,6 +121,11 @@ class RegenResult:
     #: True if any station's coolant state fell inside the vapor dome —
     #: single-phase correlations are invalid there (no boiling model!).
     boiling_detected: bool = False
+    #: True if the marched coolant pressure hit the numerical floor: the
+    #: feed pressure cannot sustain the flow (dP spiral as hot coolant
+    #: density drops) and velocities/states downstream of the collapse are
+    #: NOT physical. Raise the inlet pressure or enlarge the channels.
+    pressure_collapsed: bool = False
 
     @property
     def peak_wall_temperature(self) -> float:
@@ -185,6 +190,7 @@ class RegenCoolingModel:
         A_ch = ch.flow_area
         G = mdot_ch / A_ch  # channel mass flux
         boiling = False
+        collapsed = False
 
         x = ct.x
         for k, i in enumerate(order):
@@ -255,7 +261,10 @@ class RegenCoolingModel:
                 dP_fric = fD * dL / ch.D_h * 0.5 * st.rho * v**2
                 st_next = f.state_PH(max(P - dP_fric, 1e4), h_bulk)
                 dP_mom = G**2 * (1.0 / st_next.rho - 1.0 / st.rho)
-                P = max(P - dP_fric - dP_mom, 1e4)
+                P = P - dP_fric - dP_mom
+                if P <= 1e4:
+                    P = 1e4
+                    collapsed = True
 
         outlet_state = f.state_PH(P, h_bulk)
         dA = 2.0 * np.pi * ct.r * np.gradient(x)
@@ -267,4 +276,5 @@ class RegenCoolingModel:
             dP_total=float(P_inlet - P),
             coolant_inlet=inlet_state, coolant_outlet=outlet_state,
             boiling_detected=boiling or outlet_state.two_phase,
+            pressure_collapsed=collapsed,
         )

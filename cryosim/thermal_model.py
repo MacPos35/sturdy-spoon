@@ -44,11 +44,18 @@ Assumptions / limitations
   follows Ludwig & Dreyer, Cryogenics 63 (2014).
 * Liquid treated as incompressible for node volumes within a step; boundary
   work between ullage and liquid retained via P*dV_u/dt.
+* The optional autogenous pressurant is an EXTERNAL mass/energy source: the
+  injected vapor is not deducted from the engine/injector flow, so total
+  system mass is not closed while it operates (adequate for tank-state
+  studies; account for the return-line flow separately at vehicle level).
+* If the ullage pressure falls below the bulk liquid's vapor pressure
+  (deep blowdown), real propellant would flash-boil; no flashing model is
+  included — results in that regime are invalid.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -281,8 +288,10 @@ class TankThermalModel:
         h_ui *= cfg.ullage_interface_enhancement
         Q_u_i = h_ui * A_int * (T_u - T_i) * mixing_factor
 
-        # wet wall -> liquid (vertical wall, liquid side)
-        liq_film_T = float(np.clip(0.5 * (T_ww + T_b), f.T_triple + 0.5, T_i - 1e-3))
+        # wet wall -> liquid (vertical wall, liquid side); the clip keeps the
+        # film state liquid — degenerate range (very low P) falls back to T_i
+        liq_hi = max(T_i - 1e-3, f.T_triple + 0.6)
+        liq_film_T = float(np.clip(0.5 * (T_ww + T_b), f.T_triple + 0.5, liq_hi))
         try:
             liq_film = f.state_TP(liq_film_T, P)
         except ValueError:

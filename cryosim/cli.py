@@ -160,6 +160,10 @@ def run_coupled(cfg: dict, outdir: str) -> None:
         if any(r.boiling_detected for _, r in hist.regen_snapshots):
             print("WARNING: two-phase coolant detected in the jacket — "
                   "single-phase correlations invalid there (no boiling model)")
+        if any(r.pressure_collapsed for _, r in hist.regen_snapshots):
+            print("WARNING: coolant pressure collapsed in the jacket — feed "
+                  "pressure cannot sustain the flow; results downstream of "
+                  "the collapse are not physical")
     print(f"done: {len(a['t'])} steps -> {outdir}/")
     print(f"  fill {a['fill_fraction'][0]*100:.0f}% -> {a['fill_fraction'][-1]*100:.0f}%, "
           f"ullage P {a['P_ullage'][-1]/1e5:.2f} bar")

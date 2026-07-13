@@ -138,3 +138,12 @@ def test_combustion_gas_properties():
     assert gas.c_star == pytest.approx(1818.0, rel=0.01)
     assert gas.Pr == pytest.approx(4 * 1.14 / (9 * 1.14 - 5), rel=1e-12)
     assert 0.8 < gas.recovery_factor < 1.0
+
+
+def test_pressure_collapse_flagged(small_engine):
+    """Insufficient feed pressure must be flagged, not silently reported."""
+    model, ct, Pc, mdot = small_engine
+    res = model.solve(Pc, mdot, 110.0, 13e5)  # far too little feed pressure
+    assert res.pressure_collapsed
+    ok = model.solve(Pc, mdot, 110.0, 60e5)
+    assert not ok.pressure_collapsed

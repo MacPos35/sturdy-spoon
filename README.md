@@ -315,6 +315,38 @@ interfacial exchange and destratifies the surface layer.
 
 ---
 
+## Method fidelity vs industry practice
+
+Rocket design has two tiers of tools: fast **reduced-order / preliminary**
+methods used to iterate a design, and high-fidelity **final-design**
+solvers (full NASA CEA, method-of-characteristics nozzles, RANS/conjugate
+CFD, FEA, then hot-fire) used to qualify it. This tool sits squarely in the
+first tier — and, importantly, so does the *generation* loop of the
+industry system it emulates (LEAP 71's Noyron generates from analytical
+models + engineering logic, then hands off to external simulation to
+verify). Every sub-model here is the *same method* the industry uses for
+that first tier:
+
+| Sub-model | Industry-standard method | cryosim | Standing |
+|---|---|---|---|
+| Combustion | NASA CEA — Gibbs-min equilibrium, shifting/frozen | 8-species Gibbs-min + shifting expansion | **Same method**, within ~2–3% of CEA (fewer species, no soot) |
+| Nozzle contour | Rao thrust-optimized parabola (prelim); MOC (final) | Rao parabolic approximation | **Standard preliminary**; MOC is the higher tier |
+| Nozzle performance | Cf × angularity(λ) × friction efficiencies | identical | **Standard** |
+| Regen cooling | Bartz + Dittus–Boelter 1D (prelim); conjugate CFD (final) | identical | **Standard preliminary** |
+| Injector | Bazarov swirl theory + empirical Cd | identical | **Standard preliminary** (no atomization/stability) |
+| Manifolds | Bajura–Jones header theory | identical | **Standard** |
+| Structures | Barlow/hoop stress + ASME allowables | identical | **Standard** |
+| Slosh / TVC | NASA SP-8009 pendulum analog + linear control | identical | **Standard** (the accepted linear reference) |
+| AM geometry | Implicit/voxel kernel (PicoGK-class) | small PicoGK-like kernel | **Emerging industry standard** (LEAP 71/nTop lineage) |
+
+So: **the methods are industry-standard for preliminary design, correctly
+implemented and cross-checked** (`cryosim benchmark` puts 22 computed
+numbers next to NIST/CEA/textbook references; all within tolerance/band).
+Where it is deliberately *not* "better than industry" is fidelity: it does
+not replace full CEA, MOC, CFD or FEA, and it should not be used to qualify
+flight hardware. It is faster and more transparent than those tools, which
+is the point of the tier — not a substitute for them.
+
 ## Validation status — read this before trusting numbers
 
 Each sub-model ships with regression tests (`validation/`, run via

@@ -16,8 +16,13 @@ Generated live by `cryosim benchmark` — every computed number next to its refe
 | slosh | M-D damping, deep tank (R=0.5 m, water) | **0.0751** | 0.0750792 | % | +0.00% | correlation | Mikishev-Dorozhkin corr. (±~30% scatter) |
 | nozzle flow | Mach @ A/A*=2, g=1.4 (supersonic) | **2.1972** | 2.1972 | - | -0.00% | exact | Anderson, Modern Compressible Flow, App. A |
 | nozzle flow | Mach @ A/A*=2, g=1.4 (subsonic) | **0.3059** | 0.3059 | - | +0.00% | exact | Anderson, Modern Compressible Flow, App. A |
+| nozzle flow | divergence eff. lambda, 15-deg cone | **0.983** | 0.982963 | - | +0.00% | exact | Sutton eq. 3-34 / Huzel & Huang: 0.5(1+cos a) |
 | friction | Darcy f, smooth pipe, Re=1e5 | **0.0178** | 0.018 | - | -0.97% | exact | Moody chart / Colebrook-White |
 | combustion | ideal c*, LOX/CH4 preset (MR~3.3) | **1818** | 1750 – 1880 | m/s | in band | band | CEA class values (RocketCEA / Braeunig charts) |
+| combustion (equil.) | flame temp T_c, LOX/CH4 O/F3.2 @20bar | **3433** | 3400 – 3560 | K | in band | band | NASA CEA equil. ~3500 K; 8-species model runs ~2% cool (documented) |
+| combustion (equil.) | shifting c*, LOX/CH4 O/F3.2 @20bar | **1864** | 1800 – 1880 | m/s | in band | band | NASA CEA shifting equilibrium |
+| combustion (equil.) | vac Isp, LOX/CH4 O/F3.4 eps40 (shifting) | **373.3019** | 358 – 378 | s | in band | band | NASA CEA shifting equilibrium |
+| combustion (equil.) | peak-Isp O/F, LOX/CH4 (shifting) | **3.25** | 3 – 3.6 | - | in band | band | NASA CEA optimum (mildly rich of stoich 3.99) |
 | combustion | Bartz viscosity SI constant | **1.184e-07** | 1.1841e-07 | Pa s (g/mol)^-0.5 K^-0.6 | -0.01% | exact | unit conversion of Bartz 1957 / H&H eq. 4-16 |
 | structures | torus wall / cylinder wall as R/r->inf | **1.0017** | 1 | - | +0.17% | exact | Flugge toroidal membrane -> cylinder limit |
 | structures | 316L allowable stress | **115** | 115 | MPa | +0.00% | data | ASME B31.3 basis: 2/3 x 25 ksi L-grade yield |
@@ -27,4 +32,4 @@ Generated live by `cryosim benchmark` — every computed number next to its refe
 | CFD | Euler mass flow vs quasi-1D exact | **1.9314** | 1.87189 | kg/s | +3.18% | exact | quasi-1D isentropic (exact reference); first-order scheme bias |
 | tank thermal (K-site) | dP/dt ratio to homogeneous, 49% fill @ 3.5 W/m2 | **2.4211** | 1 – 3 | x hom. | in band | band | Van Dresar & Lin TM-105411: measured <~2; model over-predicts ~20-30% (documented) |
 
-**22/22 within tolerance/band.**
+**27/27 within tolerance/band.**

@@ -134,6 +134,12 @@ def run_benchmarks(full: bool = False) -> list[BenchmarkRow]:
                        mach_from_area_ratio(2.0, 1.4, False), 0.3059, "-",
                        "Anderson, Modern Compressible Flow, App. A",
                        kind="exact", tol=1e-3))
+    from .chamber_geometry import nozzle_divergence_efficiency
+    rows.append(_point("nozzle flow", "divergence eff. lambda, 15-deg cone",
+                       nozzle_divergence_efficiency(8.0, "conical"),
+                       0.5 * (1 + np.cos(np.radians(15.0))), "-",
+                       "Sutton eq. 3-34 / Huzel & Huang: 0.5(1+cos a)",
+                       kind="exact", tol=1e-6))
 
     # ------------------------------------------------------ friction (Moody)
     rows.append(_point("friction", "Darcy f, smooth pipe, Re=1e5",
@@ -146,6 +152,29 @@ def run_benchmarks(full: bool = False) -> list[BenchmarkRow]:
     rows.append(_band("combustion", "ideal c*, LOX/CH4 preset (MR~3.3)",
                       gas.c_star, 1750.0, 1880.0, "m/s",
                       "CEA class values (RocketCEA / Braeunig charts)"))
+    # equilibrium solver vs NASA CEA points (the industry-standard method)
+    from .combustion_equilibrium import (equilibrium_combustion, optimize_of,
+                                         shifting_c_star, shifting_isp)
+    eq = equilibrium_combustion("ch4", 3.2, 20e5)
+    rows.append(_band("combustion (equil.)",
+                      "flame temp T_c, LOX/CH4 O/F3.2 @20bar",
+                      eq.T_c, 3400.0, 3560.0, "K",
+                      "NASA CEA equil. ~3500 K; 8-species model runs ~2% "
+                      "cool (documented)"))
+    rows.append(_band("combustion (equil.)",
+                      "shifting c*, LOX/CH4 O/F3.2 @20bar",
+                      shifting_c_star("ch4", 3.2, 20e5), 1800.0, 1880.0,
+                      "m/s", "NASA CEA shifting equilibrium"))
+    rows.append(_band("combustion (equil.)",
+                      "vac Isp, LOX/CH4 O/F3.4 eps40 (shifting)",
+                      shifting_isp("ch4", 3.4, 20e5, 40.0), 358.0, 378.0,
+                      "s", "NASA CEA shifting equilibrium"))
+    of_opt, _ = optimize_of("ch4", 20e5, objective="isp_vac",
+                            expansion_ratio=40.0)
+    rows.append(_band("combustion (equil.)",
+                      "peak-Isp O/F, LOX/CH4 (shifting)",
+                      of_opt, 3.0, 3.6, "-",
+                      "NASA CEA optimum (mildly rich of stoich 3.99)"))
     rows.append(_point("combustion", "Bartz viscosity SI constant",
                        1.184e-7, 46.6e-10 * (0.4536 / 0.0254) * 1.8**0.6,
                        "Pa s (g/mol)^-0.5 K^-0.6",

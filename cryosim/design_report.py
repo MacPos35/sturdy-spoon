@@ -27,7 +27,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .engine_design import EngineDesign, LINER_MATERIALS
+from .engine_design import EngineDesign, LINER_MATERIALS, PROCESSES
 from .plots import plot_regen_distribution
 from .voxel_geometry import (MeshQA, build_chamber_jacket,
                              build_injector_head, concat_meshes, mesh_qa,
@@ -50,7 +50,7 @@ def draw_cross_section(design: EngineDesign, path: str) -> None:
     t_w, h = ch.t_wall * 1e3, ch.channel_height * 1e3
     t_c = design.t_closeout * 1e3
 
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=(9, 5), layout="tight")
     for sgn in (+1, -1):
         ax.fill_between(x, sgn * r, sgn * (r + t_w),
                         color="#b87333", label="liner (hot wall)"
@@ -81,7 +81,6 @@ def draw_cross_section(design: EngineDesign, path: str) -> None:
                  f"{design.spec.thrust/1e3:.1f} kN {design.spec.propellants}")
     ax.legend(loc="upper right", fontsize=8)
     ax.set_aspect("equal")
-    fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
 
@@ -89,7 +88,7 @@ def draw_cross_section(design: EngineDesign, path: str) -> None:
 def draw_injector_face(design: EngineDesign, path: str) -> None:
     inj = design.injector
     e, a = inj.element, inj.annulus
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(6, 6), layout="tight")
     ax.add_patch(plt.Circle((0, 0), inj.face_radius * 1e3, fill=False,
                             color="k", lw=1.2))
     for r_ring, n_on in inj.rings:
@@ -119,7 +118,6 @@ def draw_injector_face(design: EngineDesign, path: str) -> None:
     ax.set_xlim(-lim, lim)
     ax.set_ylim(-lim, lim)
     ax.set_aspect("equal")
-    fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
 
@@ -205,6 +203,51 @@ def generate_package(design: EngineDesign, outdir: str,
     return paths
 
 
+#: Conventional-machining fine-feature thresholds [m] (below → needs a
+#: fine-feature process such as LPBF; used only to frame the notes).
+_CONVENTIONAL = {"channel width": 0.8e-3, "hot wall": 0.5e-3,
+                 "throat land": 0.8e-3}
+
+#: injector-warning substrings that are modeling caveats, not defects.
+_MODEL_CAVEATS = ("approximate", "gas-like", "viscous losses", "Re ")
+
+
+def _manufacturability(design: EngineDesign) -> tuple[list, list]:
+    """Split manufacturability into genuine warnings vs process notes.
+
+    Process-aware: a feature that meets the *selected* process's floor is
+    manufacturable by that process, so it becomes an informational note
+    ("requires LPBF") rather than a warning — the design deliberately targets
+    LPBF, so flagging "needs additive manufacturing" would be spurious. Only a
+    feature below the selected process's own floor is a real warning.
+    """
+    proc = PROCESSES[design.spec.process]
+    pname = design.spec.process.upper()
+    ch = design.channel_design.channels
+    feats = [
+        ("channel width", ch.channel_width, proc["min_channel_width"]),
+        ("hot wall", ch.t_wall, proc["min_wall"]),
+        ("throat land", design.channel_design.land_at_throat,
+         proc["min_land"]),
+    ]
+    warnings, notes = [], []
+    for name, val, floor in feats:
+        if val < floor - 1e-9:
+            warnings.append(
+                f"{name} {val*1e3:.2f} mm is below the {pname} floor "
+                f"({floor*1e3:.2f} mm) — infeasible as-is")
+        elif val < _CONVENTIONAL[name]:
+            notes.append(
+                f"{name} {val*1e3:.2f} mm requires {pname} (below the "
+                f"{_CONVENTIONAL[name]*1e3:.1f} mm conventional-machining "
+                "limit — as intended for this process)")
+    # injector: separate real issues from modeling caveats
+    for w in design.injector.warnings:
+        (notes if any(s in w for s in _MODEL_CAVEATS)
+         else warnings).append(w)
+    return warnings, notes
+
+
 def render_report(design: EngineDesign, qa: list[MeshQA],
                   with_geometry: bool) -> str:
     s = design.spec
@@ -230,11 +273,14 @@ def render_report(design: EngineDesign, qa: list[MeshQA],
         mark = "✅" if item.ok else "❌"
         lines.append(f"- {mark} **{item.name}**: {item.value} "
                      f"(requirement: {item.requirement})")
-    warns = design.channel_design.manufacturability_warnings \
-        + design.injector.warnings
-    if warns:
+    warnings, notes = _manufacturability(design)
+    if warnings:
         lines += ["", "## Warnings", ""]
-        lines += [f"- ⚠️ {w}" for w in warns]
+        lines += [f"- ⚠️ {w}" for w in warnings]
+    if notes:
+        lines += ["", f"## Manufacturing & modeling notes "
+                  f"(process: {design.spec.process.upper()})", ""]
+        lines += [f"- {n}" for n in notes]
     if with_geometry:
         lines += ["", "## Generated geometry (binary STL, mm)", ""]
         for q in qa:

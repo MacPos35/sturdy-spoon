@@ -133,6 +133,27 @@ def test_infeasible_design_fails_loudly():
         design_engine(spec, **FAST)
 
 
+def test_manufacturability_is_process_aware(demo):
+    """LPBF-manufacturable features become notes, not warnings; a genuine
+    sub-floor feature would be a warning."""
+    from cryosim.design_report import _manufacturability
+    warnings, notes = _manufacturability(demo)
+    # the shipped LPBF design meets every LPBF floor -> no hard warnings
+    assert warnings == []
+    # sub-conventional (but LPBF-fine) features are surfaced as notes, and
+    # never claim to "need additive manufacturing" (LPBF already is that)
+    joined = " ".join(notes)
+    assert "requires LPBF" in joined
+    assert "needs micro-milling" not in joined
+
+
+def test_report_has_no_spurious_warnings_section(demo):
+    from cryosim.design_report import render_report
+    md = render_report(demo, [], with_geometry=False)
+    assert "## Warnings" not in md
+    assert "Manufacturing & modeling notes" in md
+
+
 def test_example_spec_parses():
     spec = EngineSpec.from_yaml("examples/engine_5kn_methalox.yaml")
     assert spec.thrust == 5e3

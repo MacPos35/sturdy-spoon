@@ -19,7 +19,7 @@ designing 'demo-5kN-methalox': 5.0 kN lox/ch4 at Pc 20 bar (deterministic encode
   [D. manifolds] torus headers: inlet duct 10.0 mm (1 feeders), outlet 20.0 mm (1), clocking 0 deg -> maldistribution 0.1%
   [E. structure] closeout shell: hoop stress at MAWP 60 bar on r 87 mm vs 316L allowable 115 MPa (x1.25) -> t = 5.65 mm (1 mm print floor)
   [done] converged: all 7 ledger constraints satisfied after 1 iteration(s)
-  (63.6 s)
+  (59.6 s)
 
 Engine design 'demo-5kN-methalox' (converged in 1 iteration(s))
 ========================================================================
@@ -50,10 +50,6 @@ Constraint ledger:
   [PASS] injector supply pressure: regen outlet 54.6 bar (req: >= Pc + drop = 24.0 bar)
   [PASS] channel-flow uniformity: 0.1% (req: <= 3% (design target))
 
-/home/user/sturdy-spoon/cryosim/design_report.py:84: UserWarning: The figure layout has changed to tight
-  fig.tight_layout()
-/home/user/sturdy-spoon/cryosim/design_report.py:122: UserWarning: The figure layout has changed to tight
-  fig.tight_layout()
   figures written
   meshing chamber jacket at 1.2 mm voxels ...
   chamber_jacket.stl: 780842 tris, watertight, V 845.2 cm^3, mass 7.522 kg, voxel 1.20 mm, bbox 268x248x220 mm

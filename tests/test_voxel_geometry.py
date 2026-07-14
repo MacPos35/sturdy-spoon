@@ -218,7 +218,26 @@ def test_organic_bell_jacket_with_manifolds_watertight():
                            rho_out=25.0, mu_out=2.0e-5, mawp=60e5,
                            material="316L")
     solid, lo, hi = build_chamber_jacket(contour, channels, 1.5e-3, man,
-                                         blend=3.0e-3)
+                                         blend=3.0e-3, features=False)
     m = mesh_solid(solid, lo, hi, 0.0008)
     assert m.is_watertight()
     assert m.volume() > 0
+
+
+def test_functional_features_watertight_and_grow_the_part():
+    """Bosses + feet + flared stubs stay watertight and add material/extent."""
+    contour = ChamberContour(throat_radius=0.016, contraction_ratio=6.0,
+                             expansion_ratio=3.5, chamber_length=0.06,
+                             nozzle_type="bell", n_points=140)
+    channels = CoolingChannels(n_channels=50, channel_width=1.0e-3,
+                               channel_height=2.0e-3, t_wall=0.6e-3)
+    plain, lo0, hi0 = build_chamber_jacket(contour, channels, 1.5e-3,
+                                           features=False)
+    feat, lo1, hi1 = build_chamber_jacket(contour, channels, 1.5e-3,
+                                          features=True, n_instrument_ports=4,
+                                          n_feet=3)
+    m0 = mesh_solid(plain, lo0, hi0, 0.001)
+    m1 = mesh_solid(feat, lo1, hi1, 0.001)
+    assert m1.is_watertight()
+    assert m1.volume() > m0.volume()          # bosses + feet add material
+    assert hi1[1] > hi0[1]                     # feet extend the radial extent

@@ -58,6 +58,8 @@ import yaml
 from .chamber_geometry import ChamberContour, nozzle_divergence_efficiency
 from .combustion import (CombustionGas, area_ratio_from_mach, gas_preset,
                          R_UNIV)
+from .combustion_equilibrium import (FUELS, equilibrium_combustion,
+                                     optimize_of, stoichiometric_of)
 from .fluids import Fluid
 from .injector_design import InjectorDesign, design_injector
 from .line_sizing import MATERIALS
@@ -102,7 +104,8 @@ class EngineSpec:
     propellants: str = "lox/ch4"        # preset key "ox/fuel"
     chamber_pressure: float = 20e5      # Pa
     ambient_pressure: float = 101325.0  # Pa (0 -> vacuum design)
-    of_ratio: float | None = None       # None -> preset default
+    of_ratio: float | None = None       # None -> optimized or preset default
+    optimize_of: bool = False           # search the peak-c* mixture ratio
     combustion_gas: dict | None = None  # override: {T_c, gamma, molar_mass}
     liner: str = "cucrzr"
     closeout_material: str = "316L"
@@ -377,21 +380,47 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
     if "/" not in spec.propellants:
         raise ValueError("propellants must be 'ox/fuel', e.g. 'lox/ch4'")
     ox_name, fuel_name = spec.propellants.split("/", 1)
+    Pc0 = spec.chamber_pressure
+    have_eq = fuel_name in FUELS and spec.combustion_gas is None
+
+    # --- mixture ratio -----------------------------------------------------
+    if spec.of_ratio is not None:
+        of = spec.of_ratio
+        log("0. setup", "mixture ratio", f"O/F = {of:.2f} (specified)")
+    elif spec.optimize_of and have_eq:
+        of, _r = optimize_of(fuel_name, Pc0, objective="c_star")
+        stoich = stoichiometric_of(fuel_name)
+        log("0. setup", "mixture ratio",
+            f"O/F = {of:.2f} optimized for peak c* on the equilibrium model "
+            f"(stoichiometric {stoich:.2f}). CAVEAT: the 8-species model has "
+            "no condensed carbon and freezes composition, so the optimum "
+            "trends fuel-rich vs a full CEA run — treat as indicative")
+    else:
+        of = spec.of_ratio or DEFAULT_OF.get(spec.propellants, 2.5)
+        log("0. setup", "mixture ratio", f"O/F = {of:.2f} (preset default)")
+
+    # --- combustion gas ----------------------------------------------------
     if spec.combustion_gas is not None:
         gas = CombustionGas(**spec.combustion_gas)
         log("0. setup", "combustion gas",
             f"user-supplied CEA values: T_c={gas.T_c:.0f} K, "
             f"gamma={gas.gamma:.3f}, M={gas.molar_mass*1e3:.1f} g/mol")
+    elif have_eq:
+        eq = equilibrium_combustion(fuel_name, of, Pc0)
+        gas = eq.as_gas()
+        top = ", ".join(f"{s} {x*100:.0f}%" for s, x in sorted(
+            eq.mole_fractions.items(), key=lambda kv: -kv[1])[:4])
+        log("0. setup", "combustion gas",
+            f"equilibrium thermochemistry ({fuel_name}+LOX, O/F {of:.2f}, "
+            f"Pc {Pc0/1e5:.0f} bar): T_c={gas.T_c:.0f} K, frozen "
+            f"gamma={gas.gamma:.3f}, M={gas.molar_mass*1e3:.1f} g/mol, "
+            f"c*={eq.c_star:.0f} m/s; products {top} (~2-3% vs CEA)")
     else:
         gas = gas_preset(spec.propellants)
         log("0. setup", "combustion gas",
             f"preset '{spec.propellants}': T_c={gas.T_c:.0f} K, "
             f"gamma={gas.gamma:.3f}, M={gas.molar_mass*1e3:.1f} g/mol "
-            "(nominal — supply combustion_gas from a CEA run for design)")
-    of = spec.of_ratio or DEFAULT_OF.get(spec.propellants, 2.5)
-    log("0. setup", "mixture ratio",
-        f"O/F = {of:.2f}" + ("" if spec.of_ratio else
-                             " (preset default)"))
+            "(no equilibrium data for this fuel — nominal preset)")
 
     if spec.liner not in LINER_MATERIALS:
         raise ValueError(f"unknown liner {spec.liner!r}; "

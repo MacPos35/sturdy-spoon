@@ -144,12 +144,14 @@ decision ([console log](results/console_design.txt)):
 
 ```
 cryosim design examples/engine_5kn_methalox.yaml -o output/engine
+→ chamber gas from equilibrium thermochemistry (CH4+LOX, O/F 3.2, 20 bar):
+  Tc 3433 K, frozen γ 1.21, M 20.5 g/mol; products H2O 44% CO 20% H2 11% CO2 10%
 → Dt 48 mm, ε 3.9, thrust-optimized 80% bell (exit angle 10.5°,
   divergence eff. 0.992 vs 0.983 for a 15° cone → +0.9% Cf)
-→ Isp 245 s SL / 279 s vac, mdot 2.10 kg/s
 → cooling channels sized under the LPBF land floor, peak wall < 800 K
 → 3-element coax-swirl injector fed the 500+ K supercritical regen outlet
 → torus manifolds blended organically into the wall; domed injector
+→ hardware detail: instrumentation/igniter boss ring, mounting feet, flared stubs
 → closeout hoop sizing, 7/7 ledger constraints PASS
 → watertight STLs: chamber_jacket / injector_head / engine_assembly
 ```
@@ -162,9 +164,11 @@ meshes. The watertightness invariant holds at every resolution.
 
 ![designed engine 3D render](results/design_render.png)
 
-Exterior (bell nozzle, organically-blended manifolds, domed injector) and a
-cutaway showing the helical regen channels, the swirl elements and the
-domed propellant plenum — all one watertight, printable body.
+Exterior (bell nozzle, organically-blended manifolds, domed injector,
+instrumentation bosses, mounting feet) and a cutaway showing the helical
+regen channels, the swirl elements and the domed propellant plenum — all one
+watertight, printable body. The chamber gas is computed by the equilibrium
+combustion solver, not a preset.
 
 ![engine cross-section](results/design_cross_section.png)
 

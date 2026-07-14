@@ -200,9 +200,10 @@ q = h_g (T_aw - T_wg) = (k_w/t_w)(T_wg - T_wc) = eta_fin h_c (T_wc - T_coolant)
   Haaland friction factor + momentum (acceleration) term; local CoolProp
   properties capture transcritical methane behavior.
 
-Combustion-gas properties (T_c, gamma, M, mu, Pr) should come from a CEA/RPA
-run for your propellants and O/F; nominal presets for LOX/CH4 and
-LOX/ethanol are included for convenience.
+Combustion-gas properties (T_c, gamma, M) are computed by the built-in
+equilibrium solver (`combustion_equilibrium.py`, above) for LOX +
+CH4/H2/ethanol/propane; nominal presets remain for other fuels, and a
+`combustion_gas` override accepts your own CEA/RPA values.
 
 ### Injector (`cryosim/injector_design.py`)
 
@@ -228,11 +229,12 @@ fuel where the incompressible orifice equation degrades.
 
 ### Autonomous design pipeline (`cryosim/engine_design.py`)
 
-Stage A performance sizing (ideal `c*`/`Cf` from the isentropic relations ×
-fixed efficiencies — `c*` 0.95, and a nozzle factor split into friction
-0.987 × **divergence efficiency λ** so a bell earns a separable gain —
-perfect-expansion area ratio with a Summerfield separation guard and vacuum
-cap, contraction-ratio and L* rules; a **thrust-optimized bell** contour by
+Stage A performance sizing (real **equilibrium-combustion** chamber gas —
+see below — then ideal `c*`/`Cf` from the isentropic relations × fixed
+efficiencies — `c*` 0.95, and a nozzle factor split into friction 0.987 ×
+**divergence efficiency λ** so a bell earns a separable gain — perfect-
+expansion area ratio with a Summerfield separation guard and vacuum cap,
+contraction-ratio and L* rules; a **thrust-optimized bell** contour by
 default) → stage B thermal (`optimize_channels` under the Δp budget with
 process feature floors) → stage C injector (fed the stage-B regen outlet
 state) → stage D manifolds → stage E closeout hoop stress (Barlow ×1.25 vs
@@ -240,6 +242,26 @@ state) → stage D manifolds → stage E closeout hoop stress (Barlow ×1.25 vs
 single-phase coolant, land width, port size, supply pressure, flow
 uniformity) drives ordered repair rules; failure is loud and carries the
 ledger. Every decision lands in the design trace.
+
+### Equilibrium combustion (`cryosim/combustion_equilibrium.py`)
+
+Instead of hand-entered gas presets, the chamber state is computed from the
+actual propellants by **Gibbs free-energy minimization** (element-potential
+method, NASA CEA-style; Gordon & McBride RP-1311): for a CxHyOz fuel + LOX
+at a given O/F and Pc it solves the equilibrium composition over 8 C/H/O
+species (CO2, CO, H2O, H2, O2, OH, H, O) with NASA-7 thermodynamic
+polynomials, closes the adiabatic energy balance for the flame temperature,
+and returns T_c, frozen γ, mean molar mass and c*. A damped-Newton solve on
+the element potentials makes it deterministic. `optimize_of` searches the
+mixture ratio for peak c* — a genuine physics-driven optimization.
+
+Validated against published CEA points (LOX/CH4, LOX/H2, LOX/ethanol) to
+within ~2–3% on T_c and c* — see `validation/test_combustion_equilibrium.py`.
+**Limitations, stated plainly:** no condensed carbon (soot) and frozen
+nozzle composition, so the *peak-c\* O/F* it finds trends fuel-rich versus a
+full CEA run — treat the O/F optimum as indicative, not authoritative; the
+gas properties *at a specified O/F* are the trustworthy output. Reactants
+referenced at 298 K (real cryo injection is colder → slightly lower T_c).
 
 ### Nozzle contour (`cryosim/chamber_geometry.py`)
 
@@ -261,7 +283,10 @@ channel bands, tori, arbitrary cylinders, spheres, hole rings, half-spaces)
 composed with hard **or smooth (filleted) booleans** — Quílez's polynomial
 smooth-min gives the organic, "grown" transitions where the torus manifolds
 blend into the chamber wall and the injector's spherical propellant **dome**
-blends onto its barrel. Sampled on a padded voxel grid, meshed with marching
+blends onto its barrel. The jacket also carries the practical hardware detail
+real printed engines have — a ring of instrumentation/igniter bosses, rounded
+mounting feet, and flared inlet stubs, all smooth-unioned on. Sampled on a
+padded voxel grid, meshed with marching
 cubes (scikit-image), written as binary STL with watertightness
 (edge-pairing), volume (divergence theorem) and mass QA. Voxel-limited
 fidelity: features under ~2 voxels round off or close — stated per part in
@@ -306,6 +331,7 @@ numbers.
 | Manifold design | Bajura & Jones (1976) header theory; toroidal-shell membrane stress (Roark) | Dividing/combining pressure-profile shapes and symmetry, uniformity improving with duct area and channel stiffness (the literature's area-ratio trend), torus wall → cylinder limit as R/r → ∞ | **Verified vs the classical theory's trends**; k_m = 0.7 is the literature mid-range, not calibrated to a rocket dataset |
 | Injector (swirl theory) | Bazarov/Yang/Puri ch. 2 closed forms; classical `mu(A)`/spray-angle charts | Hand-evaluated relation set, exact maximum-flow round-trip, chart anchor at A = 1 (mu ≈ 0.44, half-angle ≈ 33°), monotonic swirl trends, per-element flow closure | **Implementation-verified vs the ideal theory** — inviscid; real injectors run a few % lower Cd / narrower cone; NOT hot-fire validated, no stability prediction |
 | Nozzle (bell contour) | Rao TOP parabolic-approximation method; angularity efficiency `0.5(1+cosθ)` (Sutton eq. 3-34) | Exit radius = Rt√ε and exit area ratio exact, bell shorter than the 15° cone, θ_exit and λ monotonic in ε, λ(cone)=0.983 exact, bell λ>cone | **Verified vs the parabolic method + angularity model**; θ_n/θ_e are a documented chart *fit*, not MOC — geometry and the ~1% Cf credit are representative, not a point design |
+| Equilibrium combustion | NASA CEA (Gordon & McBride) published points for LOX/CH4, LOX/H2, LOX/ethanol | T_c and c* within ~2–3% of CEA across O/F and Pc; element conservation exact; rich→more CO/H2; higher Pc→hotter; peak c* rich of stoichiometric | **Band-validated vs CEA**. 8-species, frozen γ, no condensed carbon → the *peak-c\* O/F* trends rich; gas properties at a given O/F are the trusted output |
 | Design pipeline | Sutton/Huzel & Huang closed-form performance relations | c*/Cf hand checks, thrust closure `F = Cf Pc At` (exact), mass/mixture balance, plausibility bands for the 5 kN demo, exact determinism of two identical runs | **Rule-level verified**; the rules encode kN-class practice — outputs inherit each sub-model's validation status; the printed engine is a *concept*, not a qualified design |
 | Voxel geometry | Analytic volumes (sphere, torus, tube, oblique cylinder, helical channel band) | Volumes within ~2–3 % at test resolution, closed-mesh (edge-pairing) invariant on every part incl. the full jacket and injector head, STL byte-level round-trip | **Verified vs analytic references**; fidelity is voxel-limited (stated per part) |
 
@@ -340,8 +366,10 @@ numbers.
   stiffness heuristic is a chug margin, not a stability proof.
 * **Design pipeline**: deterministic rules encoding kN-class practice;
   film cooling is sized hydraulically but its thermal benefit is NOT
-  credited in the regen solution (conservative); performance via fixed
-  efficiency factors, not CEA-coupled; the bell contour is Rao's parabolic
+  credited in the regen solution (conservative); chamber gas is from the
+  built-in equilibrium solver (8-species, frozen γ, no soot — see its
+  limitations above), not a full CEA/kinetics run; the bell contour is Rao's
+  parabolic
   *approximation* with chart-fit angles (not a method-of-characteristics
   design), and its divergence-efficiency credit is the exit-angle angularity
   factor only; the organic fillets/dome are geometry for the printable model,
@@ -397,6 +425,9 @@ examples/           YAML configs + notebook
   in *Liquid Rocket Thrust Chambers: Aspects of Modeling, Analysis, and
   Design*, AIAA Progress in Astronautics and Aeronautics vol. 200, 2004.
 * Sutton & Biblarz, *Rocket Propulsion Elements* (performance relations).
+* Gordon, S. & McBride, B.J., *Computer Program for Calculation of Complex
+  Chemical Equilibrium Compositions and Applications* (NASA CEA), NASA
+  RP-1311, 1994 (equilibrium method + thermodynamic data basis).
 * LEAP 71's Noyron / PicoGK (leap71.com) — the inspiration for the
   `cryosim design` requirements-to-printable-hardware pipeline and the
   voxel geometry approach (this repo's kernel is an independent,

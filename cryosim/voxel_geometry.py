@@ -467,8 +467,9 @@ def mesh_qa(mesh: TriMesh, name: str, rho: float | None = None) -> MeshQA:
 # ----------------------------------------------------------------------
 
 def build_chamber_jacket(contour, channels, t_closeout: float,
-                         manifolds=None, blend: float = 3.0e-3
-                         ) -> tuple[Solid, tuple, tuple]:
+                         manifolds=None, blend: float = 3.0e-3,
+                         features: bool = True, n_instrument_ports: int = 4,
+                         n_feet: int = 3) -> tuple[Solid, tuple, tuple]:
     """Implicit regen chamber: wall shell - channels + torus manifolds.
 
     ``contour``/``channels`` are :class:`~cryosim.chamber_geometry.
@@ -476,7 +477,10 @@ def build_chamber_jacket(contour, channels, t_closeout: float,
     :class:`~cryosim.manifold_design.ManifoldSystemDesign`. ``blend`` is the
     smooth-union fillet radius [m] where the torus manifolds and feeder stubs
     meet the chamber wall — the organic "grown" transition instead of a hard
-    crease (0 for sharp booleans). Returns (solid, bounds_min, bounds_max).
+    crease (0 for sharp booleans). With ``features`` on, a ring of
+    ``n_instrument_ports`` instrumentation/igniter bosses and ``n_feet``
+    mounting feet are blended on — the practical hardware detail real printed
+    engines carry. Returns (solid, bounds_min, bounds_max).
     """
     x, r = contour.x, contour.r
     r_hot = r + channels.t_wall                       # channel floor
@@ -516,6 +520,8 @@ def build_chamber_jacket(contour, channels, t_closeout: float,
                       (R_T + stub_len) * np.sin(ang))
                 feeders_body.append(Cylinder(p0, p1, duct_r * 0.8 + wall))
                 feeders_bore.append(Cylinder(p0, p1, duct_r * 0.8))
+                # flared inlet flange: a rounded boss at the stub tip
+                feeders_body.append(Sphere(p1, duct_r + 1.5 * wall))
             # organic attach: fillet the feeders onto the torus and the torus
             # onto the shell (smooth-union), instead of hard-creased booleans
             manifold = smooth_union([body] + feeders_body, blend) \
@@ -527,8 +533,75 @@ def build_chamber_jacket(contour, channels, t_closeout: float,
             x_lo = min(x_lo, x_c - duct_r - wall)
             x_hi = max(x_hi, x_c + duct_r + wall)
 
+    if features:
+        solid, r_feat, x_lo2, x_hi2 = _add_functional_features(
+            solid, contour, channels, t_closeout, blend,
+            n_instrument_ports, n_feet)
+        r_max = max(r_max, r_feat)
+        x_lo, x_hi = min(x_lo, x_lo2), max(x_hi, x_hi2)
+
     b = r_max
     return solid, (x_lo, -b, -b), (x_hi, b, b)
+
+
+def _add_functional_features(solid, contour, channels, t_closeout, blend,
+                             n_instrument_ports, n_feet):
+    """Bolt-on hardware detail: instrumentation/igniter bosses + feet.
+
+    Adds the practical features real printed engines carry — a ring of
+    filleted instrumentation ports (one enlarged as an igniter) on the
+    chamber wall and rounded mounting feet near the aft end — all
+    smooth-unioned so they blend into the shell like generatively-designed
+    hardware. Bores are drilled through the ports (subtracted). Geometry
+    only; positions/sizes are representative, not stress- or flow-designed.
+    """
+    x, r = contour.x, contour.r
+    r_out = r + channels.t_wall + channels.channel_height + t_closeout
+    k = max(blend, 1e-4)
+
+    # --- instrumentation / igniter boss ring on the cylindrical chamber ---
+    x_ring = float(x[max(1, int(0.35 * contour.i_throat))])
+    r_wall = float(np.interp(x_ring, x, r_out))
+    boss_r = max(0.6 * channels.channel_height + t_closeout, 3.0e-3)
+    bores = []
+    r_feat = r_out.max()
+    for i in range(n_instrument_ports):
+        ang = 2.0 * np.pi * i / max(n_instrument_ports, 1)
+        big = (i == 0)                       # element 0 = igniter (larger)
+        rb = boss_r * (1.7 if big else 1.0)
+        reach = r_wall + rb * 1.6
+        cy, cz = np.cos(ang), np.sin(ang)
+        p0 = (x_ring, (r_wall - boss_r) * cy, (r_wall - boss_r) * cz)
+        p1 = (x_ring, reach * cy, reach * cz)
+        boss = SmoothUnion(Cylinder(p0, p1, rb), Sphere(p1, rb), k)
+        solid = SmoothUnion(solid, boss, k)
+        bore_r = 0.5 * rb if big else 0.35 * rb
+        bores.append(Cylinder((x_ring, (r_wall - 2 * boss_r) * cy,
+                               (r_wall - 2 * boss_r) * cz),
+                              (x_ring, (reach + boss_r) * cy,
+                               (reach + boss_r) * cz), bore_r))
+        r_feat = max(r_feat, reach + rb)
+    solid = solid - union(bores)
+
+    # --- mounting feet near the aft (nozzle) end --------------------------
+    x_foot = float(x[min(len(x) - 1, contour.i_throat
+                         + int(0.35 * (len(x) - contour.i_throat)))])
+    r_wall_f = float(np.interp(x_foot, x, r_out))
+    leg_r = 1.4 * boss_r
+    span = 2.5 * leg_r
+    feet = []
+    for i in range(n_feet):
+        ang = 2.0 * np.pi * (i + 0.5) / max(n_feet, 1)
+        cy, cz = np.cos(ang), np.sin(ang)
+        base = (x_foot, (r_wall_f - leg_r) * cy, (r_wall_f - leg_r) * cz)
+        pad = (x_foot + span, (r_wall_f + span) * cy, (r_wall_f + span) * cz)
+        leg = SmoothUnion(Cylinder(base, pad, leg_r), Sphere(pad, leg_r), k)
+        feet.append(leg)
+        r_feat = max(r_feat, r_wall_f + span + leg_r)
+    if feet:
+        solid = SmoothUnion(solid, smooth_union(feet, k), k)
+    x_hi2 = x_foot + span + leg_r
+    return solid, float(r_feat), float(x[0]), float(x_hi2)
 
 
 def build_injector_head(inj, plate_thickness: float | None = None,

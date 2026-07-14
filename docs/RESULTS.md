@@ -172,6 +172,11 @@ regen channels, the swirl elements and the domed propellant plenum — all one
 watertight, printable body. The chamber gas is computed by the equilibrium
 combustion solver, not a preset.
 
+The same geometry as a thin triangle mesh (~1.06M triangles), the watertight
+surface the STLs are written from:
+
+![engine geometry as a thin mesh](results/design_mesh.png)
+
 ![engine cross-section](results/design_cross_section.png)
 
 ![injector face layout](results/design_injector_face.png)

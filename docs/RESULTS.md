@@ -145,7 +145,9 @@ decision ([console log](results/console_design.txt)):
 ```
 cryosim design examples/engine_5kn_methalox.yaml -o output/engine
 → chamber gas from equilibrium thermochemistry (CH4+LOX, O/F 3.2, 20 bar):
-  Tc 3433 K, frozen γ 1.21, M 20.5 g/mol; products H2O 44% CO 20% H2 11% CO2 10%
+  Tc 3433 K, γ 1.21, M 20.5 g/mol; products H2O 44% CO 20% H2 11% CO2 10%
+→ shifting-equilibrium c* 1864 m/s (recombination through the nozzle credited);
+  optimize_of finds peak-Isp O/F 3.2 — matching CEA's mildly-rich optimum
 → Dt 48 mm, ε 3.9, thrust-optimized 80% bell (exit angle 10.5°,
   divergence eff. 0.992 vs 0.983 for a 15° cone → +0.9% Cf)
 → cooling channels sized under the LPBF land floor, peak wall < 800 K

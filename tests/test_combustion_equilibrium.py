@@ -52,6 +52,16 @@ def test_optimize_of_returns_result():
     assert res.of_ratio == pytest.approx(of)
 
 
+def test_shifting_functions_return_sane_values():
+    from cryosim.combustion_equilibrium import shifting_c_star, shifting_isp
+    cs = shifting_c_star("ch4", 3.2, 20e5)
+    assert 1700 < cs < 1950
+    # shifting c* exceeds the frozen c* (recombination credit)
+    assert cs > equilibrium_combustion("ch4", 3.2, 20e5).c_star
+    isp = shifting_isp("ch4", 3.4, 20e5, expansion_ratio=40.0)
+    assert 340 < isp < 390
+
+
 def test_extreme_off_stoich_does_not_crash():
     # very lean and very rich should still return (clamped) results
     assert equilibrium_combustion("ch4", 0.5, 20e5).T_c > 400

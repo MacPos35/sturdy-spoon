@@ -59,7 +59,8 @@ from .chamber_geometry import ChamberContour, nozzle_divergence_efficiency
 from .combustion import (CombustionGas, area_ratio_from_mach, gas_preset,
                          R_UNIV)
 from .combustion_equilibrium import (FUELS, equilibrium_combustion,
-                                     optimize_of, stoichiometric_of)
+                                     optimize_of, shifting_c_star,
+                                     stoichiometric_of)
 from .fluids import Fluid
 from .injector_design import InjectorDesign, design_injector
 from .line_sizing import MATERIALS
@@ -388,13 +389,14 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         of = spec.of_ratio
         log("0. setup", "mixture ratio", f"O/F = {of:.2f} (specified)")
     elif spec.optimize_of and have_eq:
-        of, _r = optimize_of(fuel_name, Pc0, objective="c_star")
+        of, _r = optimize_of(fuel_name, Pc0, objective="isp_vac",
+                             expansion_ratio=40.0)
         stoich = stoichiometric_of(fuel_name)
         log("0. setup", "mixture ratio",
-            f"O/F = {of:.2f} optimized for peak c* on the equilibrium model "
-            f"(stoichiometric {stoich:.2f}). CAVEAT: the 8-species model has "
-            "no condensed carbon and freezes composition, so the optimum "
-            "trends fuel-rich vs a full CEA run — treat as indicative")
+            f"O/F = {of:.2f} optimized for peak vacuum Isp (ε=40) on the "
+            f"shifting-equilibrium model (stoichiometric {stoich:.2f}) — the "
+            "recombination through the nozzle is modeled, so this lands near "
+            "the true CEA optimum")
     else:
         of = spec.of_ratio or DEFAULT_OF.get(spec.propellants, 2.5)
         log("0. setup", "mixture ratio", f"O/F = {of:.2f} (preset default)")
@@ -467,7 +469,13 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         # 0.987 x 0.983 = 0.970 (the classic lumped value), a bell recovers
         # most of the 1.7% divergence loss.
         eta_cstar, eta_friction = 0.95, 0.987
-        cstar = _c_star(gas) * eta_cstar
+        if have_eq:
+            cstar_ideal = shifting_c_star(fuel_name, of, Pc)
+            cstar_kind = "shifting-equilibrium"
+        else:
+            cstar_ideal = _c_star(gas)
+            cstar_kind = "frozen"
+        cstar = cstar_ideal * eta_cstar
         Cf, Pe = _thrust_coefficient(gas, Pc, eps, Pa)
         if Pa > 5e3 and Pe < 0.4 * Pa:
             # Summerfield separation guard (only reachable via the cap)
@@ -497,9 +505,10 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         Cf_vac, _ = _thrust_coefficient(gas, Pc, eps, 0.0)
         Isp_vac = Cf_vac * eta_cf * cstar / G0
         log("A. performance", "throat sizing",
-            f"eta_c*={eta_cstar}, eta_Cf={eta_cf:.3f} (friction "
-            f"{eta_friction} x divergence {lam:.3f}) -> c*={cstar:.0f} m/s, "
-            f"Cf={Cf:.3f}, At={At*1e4:.2f} cm^2 (Dt {2e3*Rt:.1f} mm), "
+            f"{cstar_kind} c*={cstar_ideal:.0f} m/s x eta_c*={eta_cstar}; "
+            f"eta_Cf={eta_cf:.3f} (friction {eta_friction} x divergence "
+            f"{lam:.3f}) -> c*={cstar:.0f} m/s, Cf={Cf:.3f}, "
+            f"At={At*1e4:.2f} cm^2 (Dt {2e3*Rt:.1f} mm), "
             f"mdot={mdot:.3f} kg/s, Isp={Isp:.0f} s")
         cr, why = _contraction_ratio_rule(Rt)
         log("A. performance", "contraction ratio", why)

@@ -252,16 +252,25 @@ at a given O/F and Pc it solves the equilibrium composition over 8 C/H/O
 species (CO2, CO, H2O, H2, O2, OH, H, O) with NASA-7 thermodynamic
 polynomials, closes the adiabatic energy balance for the flame temperature,
 and returns T_c, frozen γ, mean molar mass and c*. A damped-Newton solve on
-the element potentials makes it deterministic. `optimize_of` searches the
-mixture ratio for peak c* — a genuine physics-driven optimization.
+the element potentials makes it deterministic.
+
+**Shifting-equilibrium expansion** (`shifting_c_star`, `shifting_isp`): the
+chamber gas is expanded isentropically to the sonic throat (for c*) and on
+to the exit area ratio (for Isp) with the composition **re-equilibrated at
+each pressure** — so the recombination of dissociated radicals as the gas
+cools is credited (the CEA "rocket" problem). This is what makes the
+performance and the *optimum mixture ratio* correct: `optimize_of` on peak
+vacuum Isp lands at O/F ≈ 3.2 for LOX/CH4 and ≈ 1.85 for LOX/ethanol —
+matching CEA's mildly-rich optimum. (A *frozen* model, missing recombination,
+biases the optimum too fuel-rich; the shifting expansion fixes it.)
 
 Validated against published CEA points (LOX/CH4, LOX/H2, LOX/ethanol) to
-within ~2–3% on T_c and c* — see `validation/test_combustion_equilibrium.py`.
-**Limitations, stated plainly:** no condensed carbon (soot) and frozen
-nozzle composition, so the *peak-c\* O/F* it finds trends fuel-rich versus a
-full CEA run — treat the O/F optimum as indicative, not authoritative; the
-gas properties *at a specified O/F* are the trustworthy output. Reactants
-referenced at 298 K (real cryo injection is colder → slightly lower T_c).
+within ~2–3% on T_c, c* and Isp, with the peak-Isp O/F in the CEA band —
+see `validation/test_equilibrium_cea.py`. **Limits, stated plainly:** the
+8-species set omits condensed carbon, so very-rich soot-forming mixtures
+(LOX/CH4 below O/F ~1.6) are not captured; reactants are referenced at 298 K
+(real cryo injection is colder → slightly lower T_c). LOX/H2's optimum comes
+out a little rich (~3.8 vs CEA ~4.3), the hardest case for the reduced set.
 
 ### Nozzle contour (`cryosim/chamber_geometry.py`)
 
@@ -331,7 +340,7 @@ numbers.
 | Manifold design | Bajura & Jones (1976) header theory; toroidal-shell membrane stress (Roark) | Dividing/combining pressure-profile shapes and symmetry, uniformity improving with duct area and channel stiffness (the literature's area-ratio trend), torus wall → cylinder limit as R/r → ∞ | **Verified vs the classical theory's trends**; k_m = 0.7 is the literature mid-range, not calibrated to a rocket dataset |
 | Injector (swirl theory) | Bazarov/Yang/Puri ch. 2 closed forms; classical `mu(A)`/spray-angle charts | Hand-evaluated relation set, exact maximum-flow round-trip, chart anchor at A = 1 (mu ≈ 0.44, half-angle ≈ 33°), monotonic swirl trends, per-element flow closure | **Implementation-verified vs the ideal theory** — inviscid; real injectors run a few % lower Cd / narrower cone; NOT hot-fire validated, no stability prediction |
 | Nozzle (bell contour) | Rao TOP parabolic-approximation method; angularity efficiency `0.5(1+cosθ)` (Sutton eq. 3-34) | Exit radius = Rt√ε and exit area ratio exact, bell shorter than the 15° cone, θ_exit and λ monotonic in ε, λ(cone)=0.983 exact, bell λ>cone | **Verified vs the parabolic method + angularity model**; θ_n/θ_e are a documented chart *fit*, not MOC — geometry and the ~1% Cf credit are representative, not a point design |
-| Equilibrium combustion | NASA CEA (Gordon & McBride) published points for LOX/CH4, LOX/H2, LOX/ethanol | T_c and c* within ~2–3% of CEA across O/F and Pc; element conservation exact; rich→more CO/H2; higher Pc→hotter; peak c* rich of stoichiometric | **Band-validated vs CEA**. 8-species, frozen γ, no condensed carbon → the *peak-c\* O/F* trends rich; gas properties at a given O/F are the trusted output |
+| Equilibrium combustion | NASA CEA (Gordon & McBride) published points for LOX/CH4, LOX/H2, LOX/ethanol | T_c, c* and shifting Isp within ~2–3% of CEA; element conservation exact; **peak-Isp O/F in the CEA band** (CH4 ~3.2, EtOH ~1.85) via shifting-equilibrium expansion; higher Pc→hotter | **Band-validated vs CEA**. 8-species, no condensed carbon (soot-forming O/F<~1.6 not captured); LOX/H2 optimum a touch rich |
 | Design pipeline | Sutton/Huzel & Huang closed-form performance relations | c*/Cf hand checks, thrust closure `F = Cf Pc At` (exact), mass/mixture balance, plausibility bands for the 5 kN demo, exact determinism of two identical runs | **Rule-level verified**; the rules encode kN-class practice — outputs inherit each sub-model's validation status; the printed engine is a *concept*, not a qualified design |
 | Voxel geometry | Analytic volumes (sphere, torus, tube, oblique cylinder, helical channel band) | Volumes within ~2–3 % at test resolution, closed-mesh (edge-pairing) invariant on every part incl. the full jacket and injector head, STL byte-level round-trip | **Verified vs analytic references**; fidelity is voxel-limited (stated per part) |
 
@@ -366,9 +375,10 @@ numbers.
   stiffness heuristic is a chug margin, not a stability proof.
 * **Design pipeline**: deterministic rules encoding kN-class practice;
   film cooling is sized hydraulically but its thermal benefit is NOT
-  credited in the regen solution (conservative); chamber gas is from the
-  built-in equilibrium solver (8-species, frozen γ, no soot — see its
-  limitations above), not a full CEA/kinetics run; the bell contour is Rao's
+  credited in the regen solution (conservative); chamber gas and c*/Isp are
+  from the built-in equilibrium solver with shifting-equilibrium expansion
+  (8-species, no soot — see its limitations above), not a full CEA/kinetics
+  run; the bell contour is Rao's
   parabolic
   *approximation* with chart-fit angles (not a method-of-characteristics
   design), and its divergence-efficiency credit is the exit-angle angularity

@@ -13,6 +13,8 @@ import pytest
 from cryosim.combustion_equilibrium import (
     equilibrium_combustion,
     optimize_of,
+    shifting_c_star,
+    shifting_isp,
     stoichiometric_of,
 )
 
@@ -80,3 +82,34 @@ def test_pressure_raises_temperature():
     lo = equilibrium_combustion("ch4", 3.4, 10e5).T_c
     hi = equilibrium_combustion("ch4", 3.4, 200e5).T_c
     assert hi > lo + 50.0
+
+
+# --- shifting-equilibrium expansion (the real O/F-optimum fix) ----------
+
+def test_shifting_cstar_beats_frozen_and_matches_cea():
+    """Shifting c* > frozen (recombination credit) and within ~2% of CEA."""
+    froz = equilibrium_combustion("ch4", 3.2, 20e5).c_star
+    shift = shifting_c_star("ch4", 3.2, 20e5)
+    assert shift > froz
+    assert 1810 <= shift <= 1900          # CEA ~1837
+
+
+def test_shifting_isp_magnitude():
+    """Vacuum Isp (eps=40) for LOX/CH4 lands in the CEA band."""
+    isp = shifting_isp("ch4", 3.4, 20e5, expansion_ratio=40.0)
+    assert 355 <= isp <= 380              # CEA ~365-372
+
+
+@pytest.mark.parametrize("fuel,of_lo,of_hi", [
+    ("ch4", 3.0, 3.6),        # CEA peak-Isp ~3.3-3.5
+    ("ethanol", 1.7, 2.0),    # CEA ~1.8-1.9
+])
+def test_shifting_of_optimum_near_cea(fuel, of_lo, of_hi):
+    """The key fix: peak-Isp O/F on the shifting model sits near the true
+    (mildly rich) CEA optimum, not the frozen model's fuel-rich bias."""
+    of_opt, _ = optimize_of(fuel, 20e5, objective="isp_vac",
+                            expansion_ratio=40.0)
+    assert of_lo <= of_opt <= of_hi
+    # and clearly leaner than the frozen-c* optimum
+    of_frozen_cstar, _ = optimize_of(fuel, 20e5, objective="c_star")
+    assert of_opt > of_frozen_cstar

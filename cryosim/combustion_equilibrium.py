@@ -244,7 +244,14 @@ def _solve_composition(T, P_bar, b):
         y = y + step * dy
 
     lam, lnN = y[:3], y[3]
-    return np.exp(lnN + np.clip(_A @ lam - g0, -400.0, 60.0))
+    n = np.exp(lnN + np.clip(_A @ lam - g0, -400.0, 60.0))
+    # robustness: at very low T the potentials get stiff and Newton can
+    # diverge; the complete-combustion estimate IS essentially the (nearly
+    # undissociated) equilibrium there, so fall back to it if unconverged.
+    if not np.all(np.isfinite(n)) or np.max(np.abs(_A.T @ n - b)
+                                            / (b + 1e-12)) > 1e-3:
+        n = _initial_moles(b)
+    return n
 
 
 def equilibrium_combustion(fuel: str, of_ratio: float, Pc: float,
@@ -303,44 +310,140 @@ def _package(T_c, Pc, b, fuel, of_ratio) -> EquilibriumResult:
         fuel=fuel.name)
 
 
-def optimize_of(fuel: str, Pc: float, objective: str = "c_star",
-                expansion_ratio: float | None = None,
-                bounds: tuple = (1.0, 8.0)) -> tuple[float, EquilibriumResult]:
-    """Mixture ratio that maximizes performance (physics-driven O/F search).
+def _s_R(T):
+    """Standard-state entropy S°/R for every species at T (1 bar)."""
+    return np.array([_poly_S_R(_NASA7_HIGH[s], T) for s in _SPECIES])
 
-    ``objective``: ``"c_star"`` (chamber performance, ε-independent) or
-    ``"isp_vac"`` (needs ``expansion_ratio``). Returns (O/F, result).
-    Peak c* sits fuel-rich of stoichiometric because dissociation and low
-    product molar mass favor excess fuel — the classic result.
+
+def _state(T, P_bar, b):
+    """Equilibrium state on a per-mol-fuel basis at (T, P).
+
+    Returns (n, mass[kg], H[J], S[J/K]) with the mixture entropy including
+    the −R ln(x_i P) partial-pressure term (standard state 1 bar).
     """
-    from .combustion import mach_from_area_ratio
+    n = _solve_composition(T, P_bar, b)
+    ntot = n.sum()
+    mass = float((n * _M).sum())
+    H = float((n * _h_RT(T)).sum() * R_UNIV * T)
+    x = np.clip(n / ntot, 1e-30, None)
+    s_i = R_UNIV * (_s_R(T) - np.log(x * P_bar))     # per mole, J/(mol K)
+    S = float((n * s_i).sum())
+    return n, mass, H, S
 
+
+G0 = 9.80665
+
+
+class _Isentrope:
+    """Shifting-equilibrium isentropic expansion from a chamber state.
+
+    Provides the flow state (T, ρ, velocity, mass flux) at any pressure
+    along the constant-entropy path, with the composition re-equilibrated at
+    each point — the machinery shared by the shifting c* and Isp routines.
+    """
+
+    def __init__(self, fuel: str, of_ratio: float, Pc: float):
+        f = FUELS[fuel.strip().lower()]
+        n_O2 = of_ratio * f.molar_mass / _M_O2
+        self.b = np.array([float(f.nC), float(f.nH), f.nO + 2.0 * n_O2])
+        self.Pc_bar = Pc / 1e5
+        self.Pc = Pc
+        self.Tc = equilibrium_combustion(fuel, of_ratio, Pc).T_c
+        _, self.mass, Hc, Sc = _state(self.Tc, self.Pc_bar, self.b)
+        self.h_c = Hc / self.mass
+        self.s_c = Sc / self.mass
+
+    def at(self, P_bar):
+        """(T, rho, V, mass_flux) on the isentrope at pressure P_bar."""
+        def resid(t):
+            return _state(t, P_bar, self.b)[3] / self.mass - self.s_c
+        lo, hi = 80.0, self.Tc + 1.0
+        if resid(lo) > 0.0:      # over-expanded past model validity: clamp
+            T = lo
+        else:
+            T = brentq(resid, lo, hi, xtol=5e-3)
+        n, _m, H, _S = _state(T, P_bar, self.b)
+        M = _m / n.sum()
+        rho = (P_bar * 1e5) * M / (R_UNIV * T)
+        V = np.sqrt(max(2.0 * (self.h_c - H / _m), 0.0))
+        return T, rho, V, rho * V
+
+    def throat(self):
+        """Sonic-throat state (V = equilibrium sound speed)."""
+        def mach_excess(P_bar):
+            _T, rho, V, _g = self.at(P_bar)
+            dP = P_bar * 1e-3
+            _T2, rho2, _V2, _g2 = self.at(P_bar - dP)
+            a = np.sqrt((dP * 1e5) / (rho - rho2))     # (dP/drho)_s
+            return V / a - 1.0
+        P_t = brentq(mach_excess, 0.30 * self.Pc_bar, 0.98 * self.Pc_bar,
+                     xtol=1e-4)
+        return P_t, self.at(P_t)
+
+
+def shifting_c_star(fuel: str, of_ratio: float, Pc: float) -> float:
+    """Characteristic velocity with *shifting* equilibrium (CEA rocket problem).
+
+    Expands the chamber gas isentropically to the sonic throat while the
+    composition re-equilibrates (dissociated radicals recombine as the gas
+    cools, releasing heat) — the recombination credit a frozen model misses.
+    c* = Pc / (rho* V*) at the throat.
+    """
+    iso = _Isentrope(fuel, of_ratio, Pc)
+    _P_t, (_T, rho_t, V_t, _flux) = iso.throat()
+    return Pc / (rho_t * V_t)
+
+
+def shifting_isp(fuel: str, of_ratio: float, Pc: float,
+                 expansion_ratio: float = 40.0) -> float:
+    """Vacuum specific impulse [s] with shifting-equilibrium expansion.
+
+    Continues the isentrope past the throat to the exit area ratio, where
+    the recombination of dissociated species is largely complete — this is
+    where shifting flow matters most, and why the *peak-Isp* mixture ratio
+    lands near the true CEA optimum (frozen flow biases it fuel-rich).
+    """
+    iso = _Isentrope(fuel, of_ratio, Pc)
+    _P_t, (_Tt, _rt, _Vt, flux_t) = iso.throat()
+
+    def area_excess(P_bar):
+        _T, rho, V, flux = iso.at(P_bar)
+        return flux_t / flux - expansion_ratio        # Ae/At target
+    P_e = brentq(area_excess, 1e-3, _P_t * 0.999, xtol=1e-5)
+    _Te, _re, V_e, flux_e = iso.at(P_e)
+    # Isp_vac = (V_e + Pe*Ae/mdot)/g0 ; Pe*Ae/mdot = eps*Pe/flux_t
+    return (V_e + expansion_ratio * (P_e * 1e5) / flux_t) / G0
+
+
+def optimize_of(fuel: str, Pc: float, objective: str = "isp_vac",
+                expansion_ratio: float = 40.0,
+                bounds: tuple = (1.5, 6.0), n_scan: int = 10
+                ) -> tuple[float, EquilibriumResult]:
+    """Mixture ratio that maximizes performance, on the *shifting* model.
+
+    ``objective``: ``"isp_vac"`` (vacuum Isp at ``expansion_ratio`` —
+    recommended; recombination through the full nozzle is what fixes the
+    optimum) or ``"c_star"`` (chamber/throat only). Because the expansion is
+    shifting-equilibrium, the peak lands near the true CEA optimum — mildly
+    rich of stoichiometric — instead of the fuel-rich bias a frozen model
+    gives. Returns (O/F, chamber result). Coarser ``n_scan`` trades accuracy
+    for speed (each sample is a full nozzle expansion).
+    """
     def perf(of):
-        res = equilibrium_combustion(fuel, of, Pc)
-        if objective == "c_star":
-            return res.c_star
         if objective == "isp_vac":
-            if expansion_ratio is None:
-                raise ValueError("isp_vac objective needs expansion_ratio")
-            g = res.gamma
-            Me = mach_from_area_ratio(expansion_ratio, g, supersonic=True)
-            Pe_Pc = (1 + (g - 1) / 2 * Me**2) ** (-g / (g - 1))
-            CF = np.sqrt(2 * g**2 / (g - 1)
-                         * (2 / (g + 1)) ** ((g + 1) / (g - 1))
-                         * (1 - Pe_Pc ** ((g - 1) / g))) \
-                + expansion_ratio * Pe_Pc
-            return CF * res.c_star / 9.80665
-        raise ValueError("objective must be 'c_star' or 'isp_vac'")
+            return shifting_isp(fuel, of, Pc, expansion_ratio)
+        if objective == "c_star":
+            return shifting_c_star(fuel, of, Pc)
+        raise ValueError("objective must be 'isp_vac' or 'c_star'")
 
-    ofs = np.linspace(bounds[0], bounds[1], 22)
+    ofs = np.linspace(bounds[0], bounds[1], n_scan)
     vals = np.array([perf(o) for o in ofs])
     i = int(np.argmax(vals))
     lo = ofs[max(i - 1, 0)]
     hi = ofs[min(i + 1, len(ofs) - 1)]
-    # golden-ish refine
-    best_of, best_v = ofs[i], vals[i]
-    for o in np.linspace(lo, hi, 15):
+    best_of, best_v = float(ofs[i]), float(vals[i])
+    for o in np.linspace(lo, hi, 9):
         v = perf(o)
         if v > best_v:
-            best_of, best_v = o, v
-    return float(best_of), equilibrium_combustion(fuel, best_of, Pc)
+            best_of, best_v = float(o), v
+    return best_of, equilibrium_combustion(fuel, best_of, Pc)

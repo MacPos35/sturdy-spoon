@@ -144,10 +144,13 @@ decision ([console log](results/console_design.txt)):
 
 ```
 cryosim design examples/engine_5kn_methalox.yaml -o output/engine
-→ Dt 48 mm, ε 3.9, Isp 243 s SL / 277 s vac, mdot 2.10 kg/s
+→ Dt 48 mm, ε 3.9, thrust-optimized 80% bell (exit angle 10.5°,
+  divergence eff. 0.992 vs 0.983 for a 15° cone → +0.9% Cf)
+→ Isp 245 s SL / 279 s vac, mdot 2.10 kg/s
 → cooling channels sized under the LPBF land floor, peak wall < 800 K
 → 3-element coax-swirl injector fed the 500+ K supercritical regen outlet
-→ torus manifolds, closeout hoop sizing, 7/7 ledger constraints PASS
+→ torus manifolds blended organically into the wall; domed injector
+→ closeout hoop sizing, 7/7 ledger constraints PASS
 → watertight STLs: chamber_jacket / injector_head / engine_assembly
 ```
 
@@ -157,11 +160,15 @@ the STLs stay a manageable size; the finer defaults (0.5 / 0.3 mm) resolve
 the cooling channels and swirlers for print prep but produce much larger
 meshes. The watertightness invariant holds at every resolution.
 
+![designed engine 3D render](results/design_render.png)
+
+Exterior (bell nozzle, organically-blended manifolds, domed injector) and a
+cutaway showing the helical regen channels, the swirl elements and the
+domed propellant plenum — all one watertight, printable body.
+
 ![engine cross-section](results/design_cross_section.png)
 
 ![injector face layout](results/design_injector_face.png)
-
-![designed engine 3D render](results/design_render.png)
 
 The full explainable decision record (`trace.md`) and performance report
 (`report.md`) are generated next to the STLs. The "AI" is deterministic

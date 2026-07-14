@@ -23,3 +23,5 @@ process: lpbf                # lpbf | machined (sets feature-size floors)
 dp_budget: 3.0e6             # Pa, jacket pressure-drop budget
 stiffness: 0.20              # injector dP / Pc
 film_fraction: 0.10          # share of fuel to the wall film ring
+nozzle_type: bell            # bell (thrust-optimized) | conical
+bell_percent: 0.8            # bell length vs the 15-deg cone reference

@@ -102,6 +102,57 @@ def union(solids) -> Solid:
     return out
 
 
+# ----------------------------------------------------------------------
+# Smooth (filleted) booleans — the organic-blend operators
+# ----------------------------------------------------------------------
+#
+# Iñigo Quílez's polynomial smooth-min: instead of a hard crease where two
+# solids meet (plain min/max), the surfaces merge over a blend radius ``k``,
+# leaving a fillet. This is what gives generatively-designed hardware its
+# "grown, not assembled" look. The composite field is not an exact distance
+# (the primitives here aren't all unit-gradient), but the sign is correct and
+# the fillet radius is ~k where the merged surfaces are near-distance — good
+# for geometry/printing, not for metrology.
+
+def _smin(a, b, k):
+    """Polynomial smooth-min of two fields with blend radius k > 0."""
+    h = np.clip(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
+    return b * (1.0 - h) + a * h - k * h * (1.0 - h)
+
+
+class SmoothUnion(Solid):
+    """Union of two solids blended over radius ``k`` (fillet at the joint)."""
+
+    def __init__(self, a, b, k):
+        self.a, self.b, self.k = a, b, float(k)
+
+    def sdf(self, X, Y, Z):
+        return _smin(self.a.sdf(X, Y, Z), self.b.sdf(X, Y, Z), self.k)
+
+
+class SmoothDifference(Solid):
+    """``a`` minus ``b`` with a smooth (filleted) cut of radius ``k``."""
+
+    def __init__(self, a, b, k):
+        self.a, self.b, self.k = a, b, float(k)
+
+    def sdf(self, X, Y, Z):
+        da, db = self.a.sdf(X, Y, Z), self.b.sdf(X, Y, Z)
+        # -smin(-da, db, k): smooth max(da, -db)
+        return -_smin(-da, db, self.k)
+
+
+def smooth_union(solids, k: float) -> Solid:
+    """Left-fold a list of solids with :class:`SmoothUnion` (radius ``k``)."""
+    solids = list(solids)
+    if not solids:
+        return Empty()
+    out = solids[0]
+    for s in solids[1:]:
+        out = SmoothUnion(out, s, k)
+    return out
+
+
 class Sphere(Solid):
     def __init__(self, center, r):
         self.c, self.r = np.asarray(center, float), float(r)
@@ -109,6 +160,21 @@ class Sphere(Solid):
     def sdf(self, X, Y, Z):
         c = self.c
         return np.sqrt((X - c[0])**2 + (Y - c[1])**2 + (Z - c[2])**2) - self.r
+
+
+class HalfSpaceX(Solid):
+    """Solid half-space along x: keeps x <= x0 (``below=True``) or x >= x0.
+
+    Handy for capping domes and for cutaway renders (intersect a part with a
+    half-space through the axis to expose its internals).
+    """
+
+    def __init__(self, x0, below: bool = True):
+        self.x0 = float(x0)
+        self.sign = 1.0 if below else -1.0
+
+    def sdf(self, X, Y, Z):
+        return self.sign * (X - self.x0) + np.zeros_like(Y)
 
 
 class CylinderX(Solid):
@@ -401,13 +467,16 @@ def mesh_qa(mesh: TriMesh, name: str, rho: float | None = None) -> MeshQA:
 # ----------------------------------------------------------------------
 
 def build_chamber_jacket(contour, channels, t_closeout: float,
-                         manifolds=None) -> tuple[Solid, tuple, tuple]:
+                         manifolds=None, blend: float = 3.0e-3
+                         ) -> tuple[Solid, tuple, tuple]:
     """Implicit regen chamber: wall shell - channels + torus manifolds.
 
     ``contour``/``channels`` are :class:`~cryosim.chamber_geometry.
     ChamberContour` / ``CoolingChannels``; ``manifolds`` an optional
-    :class:`~cryosim.manifold_design.ManifoldSystemDesign`. Returns
-    (solid, bounds_min, bounds_max).
+    :class:`~cryosim.manifold_design.ManifoldSystemDesign`. ``blend`` is the
+    smooth-union fillet radius [m] where the torus manifolds and feeder stubs
+    meet the chamber wall — the organic "grown" transition instead of a hard
+    crease (0 for sharp booleans). Returns (solid, bounds_min, bounds_max).
     """
     x, r = contour.x, contour.r
     r_hot = r + channels.t_wall                       # channel floor
@@ -447,8 +516,13 @@ def build_chamber_jacket(contour, channels, t_closeout: float,
                       (R_T + stub_len) * np.sin(ang))
                 feeders_body.append(Cylinder(p0, p1, duct_r * 0.8 + wall))
                 feeders_bore.append(Cylinder(p0, p1, duct_r * 0.8))
-            solid = (solid | body | union(feeders_body)) \
-                - cavity - slot - union(feeders_bore)
+            # organic attach: fillet the feeders onto the torus and the torus
+            # onto the shell (smooth-union), instead of hard-creased booleans
+            manifold = smooth_union([body] + feeders_body, blend) \
+                if blend > 0 else union([body] + feeders_body)
+            solid = (SmoothUnion(solid, manifold, blend) if blend > 0
+                     else solid | manifold)
+            solid = solid - cavity - slot - union(feeders_bore)
             r_max = max(r_max, R_T + duct_r + wall + stub_len)
             x_lo = min(x_lo, x_c - duct_r - wall)
             x_hi = max(x_hi, x_c + duct_r + wall)
@@ -457,25 +531,37 @@ def build_chamber_jacket(contour, channels, t_closeout: float,
     return solid, (x_lo, -b, -b), (x_hi, b, b)
 
 
-def build_injector_head(inj, plate_thickness: float | None = None
+def build_injector_head(inj, plate_thickness: float | None = None,
+                        blend: float = 2.5e-3
                         ) -> tuple[Solid, tuple, tuple]:
     """Implicit coaxial-swirl injector head from an ``InjectorDesign``.
 
     A body of revolution sitting at x in [-H, 0] (chamber side at x = 0),
     with per element: the vortex-chamber bore, the exit-nozzle bore, the
     fuel annulus, and the tangential LOX ports; plus the film-cooling ring.
-    Internal ox/fuel distribution domes are represented as simple plenum
-    cavities — this is a geometric model for visualization/printing studies,
+    The propellant side is closed by a smooth spherical dome (the classic
+    injector/manifold dome) blended onto the barrel with fillet radius
+    ``blend`` — the organic form, not a flat plate. Internal plena are
+    simple cavities: a geometric model for visualization/printing studies,
     not a flow-balanced dome design.
     """
     e = inj.element
     a = inj.annulus
     t_face = plate_thickness or max(3.0e-3, 2.0 * a.gap)
     L_noz = e.L_nozzle + t_face
-    H = e.L_vortex + L_noz + 2.0 * t_face      # total head height
+    H = e.L_vortex + L_noz + 2.0 * t_face      # barrel height (face to back)
     R_body = inj.face_radius + 4.0e-3
 
-    body = CylinderX(-H, 0.0, R_body)
+    # domed back: spherical cap of rise ~0.5 R_body, smooth-blended to the
+    # barrel so the propellant side is a rounded dome rather than a flat disc
+    dome_rise = 0.5 * R_body
+    R_dome = (R_body**2 + dome_rise**2) / (2.0 * dome_rise)
+    cx = -H + (R_dome - dome_rise)
+    dome_cap = Sphere((cx, 0.0, 0.0), R_dome) & HalfSpaceX(-H, below=True)
+    barrel = CylinderX(-H, 0.0, R_body)
+    body = SmoothUnion(barrel, dome_cap, blend) if blend > 0 else \
+        (barrel | dome_cap)
+    x_back = -H - dome_rise
     cuts: list[Solid] = []
     x_vc0 = -L_noz - e.L_vortex                # vortex-chamber span
     for r_ring, n_on_ring in inj.rings:
@@ -503,13 +589,13 @@ def build_injector_head(inj, plate_thickness: float | None = None
                     (tx, ey - dy * L_port / 2, ez - dz * L_port / 2),
                     (tx, ey + dy * L_port / 2, ez + dz * L_port / 2),
                     e.r_tangential))
-    # simple ox plenum above the vortex chambers
+    # ox plenum hollowing the dome (leaves ~t_face dome wall)
     r_plenum = min(R_body - 3.0e-3,
                    max(rr for rr, _ in inj.rings) + e.r_vortex)
     if r_plenum > 0:
-        cuts.append(CylinderX(-H + t_face, x_vc0, r_plenum))
+        cuts.append(CylinderX(x_back + t_face, x_vc0, r_plenum))
     if inj.film is not None:
         f = inj.film
         cuts.append(RingHolesX(-H, 0.0, f.ring_radius, f.n_holes, f.d_hole))
     solid = body - union(cuts)
-    return solid, (-H, -R_body, -R_body), (0.0, R_body, R_body)
+    return solid, (x_back, -R_body, -R_body), (0.0, R_body, R_body)

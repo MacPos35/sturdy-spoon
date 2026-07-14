@@ -27,6 +27,90 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
+def _bell_angles(expansion_ratio: float, bell_percent: float
+                 ) -> tuple[float, float]:
+    """Parabola start/exit wall angles (theta_n, theta_e) in radians.
+
+    Rao's thrust-optimized-parabola method reads these two angles off a chart
+    keyed to expansion ratio and percent-length. The exact chart is not
+    reproducible offline, so we use a smooth documented fit anchored to its
+    well-known 80%-bell values: theta_n rises and theta_e falls with area
+    ratio (a longer, gentler exit as the nozzle grows), and a shorter bell
+    (smaller percent) trades a steeper exit angle for length. Good enough to
+    generate a representative bell contour and its divergence loss; not a
+    substitute for a method-of-characteristics design.
+    """
+    ln_eps = np.log(max(expansion_ratio, 1.5))
+    theta_n = np.radians(np.clip(22.0 + 4.0 * ln_eps, 20.0, 40.0))
+    theta_e = np.radians(np.clip(14.0 - 2.6 * ln_eps, 3.0, 18.0))
+    # shorter-than-80% bells exit steeper (more divergence loss)
+    theta_e = theta_e + np.radians(14.0 * (0.8 - bell_percent))
+    return float(theta_n), float(max(theta_e, np.radians(2.0)))
+
+
+def nozzle_divergence_efficiency(expansion_ratio: float, nozzle_type: str,
+                                 bell_percent: float = 0.8,
+                                 div_angle_deg: float = 15.0) -> float:
+    """Divergence (angularity) efficiency lambda without building a contour.
+
+    Lets the sizing loop credit the bell's reduced exit angle before the
+    throat radius is known (lambda depends only on the exit geometry, not on
+    scale). Same ``0.5(1 + cos theta_exit)`` model as
+    :meth:`ChamberContour.divergence_efficiency`.
+    """
+    if nozzle_type == "bell":
+        _, theta_e = _bell_angles(expansion_ratio, bell_percent)
+    else:
+        theta_e = np.radians(div_angle_deg)
+    return 0.5 * (1.0 + np.cos(theta_e))
+
+
+def _bell_divergent(Rt: float, Re: float, rho_d: float,
+                    expansion_ratio: float, bell_percent: float,
+                    x_throat: float):
+    """Build the (x, r) polyline of a Rao-style bell divergent section.
+
+    Downstream throat arc of radius ``rho_d`` swept to the parabola-start
+    angle ``theta_n``, then a quadratic Bezier (the classic parabola
+    approximation) to the exit lip at radius ``Re`` and wall angle
+    ``theta_e``. Returns (xb, rb, x_exit, theta_exit_rad).
+    """
+    theta_n, theta_e = _bell_angles(expansion_ratio, bell_percent)
+    # reference 15-deg conical length from throat to exit (Rao normalization)
+    a15 = np.radians(15.0)
+    r_td15 = Rt + rho_d * (1.0 - np.cos(a15))
+    Ln_ref = (rho_d * np.sin(a15)
+              + max(Re - r_td15, 0.0) / np.tan(a15))
+    Ln = bell_percent * Ln_ref
+
+    # downstream throat arc, throat -> N (center at (x_throat, Rt + rho_d))
+    phi = np.linspace(0.0, theta_n, 30)
+    xa = x_throat + rho_d * np.sin(phi)
+    ra = Rt + rho_d * (1.0 - np.cos(phi))
+    Nx, Nr = xa[-1], ra[-1]
+    Ex, Er = x_throat + Ln, Re
+
+    # control point Q = intersection of the two tangent lines
+    #   N + t (cos tn, sin tn) = E - s (cos te, sin te)
+    A = np.array([[np.cos(theta_n), np.cos(theta_e)],
+                  [np.sin(theta_n), np.sin(theta_e)]])
+    rhs = np.array([Ex - Nx, Er - Nr])
+    try:
+        t, _s = np.linalg.solve(A, rhs)
+        Qx, Qr = Nx + t * np.cos(theta_n), Nr + t * np.sin(theta_n)
+    except np.linalg.LinAlgError:  # parallel tangents (degenerate) -> straight
+        Qx, Qr = 0.5 * (Nx + Ex), 0.5 * (Nr + Er)
+
+    u = np.linspace(0.0, 1.0, 140)
+    xbz = (1 - u) ** 2 * Nx + 2 * (1 - u) * u * Qx + u ** 2 * Ex
+    rbz = (1 - u) ** 2 * Nr + 2 * (1 - u) * u * Qr + u ** 2 * Er
+    xb = np.concatenate([xa, xbz[1:]])
+    rb = np.concatenate([ra, rbz[1:]])
+    # guarantee monotonic x for interpolation (a sane bell already is)
+    keep = np.concatenate([[True], np.diff(xb) > 0])
+    return xb[keep], rb[keep], float(Ex), theta_e
+
+
 class ChamberContour:
     """Axisymmetric inner-wall contour r(x); x measured from injector face.
 
@@ -37,9 +121,13 @@ class ChamberContour:
     expansion_ratio : Ae/At
     chamber_length : length of the cylindrical chamber section [m]
     conv_angle_deg : convergent cone half-angle [deg]
-    div_angle_deg : divergent cone half-angle [deg]
+    div_angle_deg : divergent cone half-angle [deg] (conical nozzle only)
     r_conv_factor, r_div_factor : throat arc radii / Rt (upstream, downstream)
     n_points : total sampling points along the contour
+    nozzle_type : "conical" (straight divergent) or "bell" (thrust-optimized
+        parabolic-approximation / Rao TOP contour)
+    bell_percent : bell length as a fraction of the reference 15-deg cone
+        (0.8 = the near-universal "80% bell"; bell nozzles only)
     """
 
     def __init__(
@@ -53,9 +141,13 @@ class ChamberContour:
         r_conv_factor: float = 1.5,
         r_div_factor: float = 0.382,
         n_points: int = 200,
+        nozzle_type: str = "conical",
+        bell_percent: float = 0.8,
     ):
         if contraction_ratio <= 1.0 or expansion_ratio < 1.0:
             raise ValueError("contraction_ratio must be > 1 and expansion_ratio >= 1")
+        if nozzle_type not in ("conical", "bell"):
+            raise ValueError("nozzle_type must be 'conical' or 'bell'")
         Rt = throat_radius
         Rc = Rt * np.sqrt(contraction_ratio)
         Re = Rt * np.sqrt(expansion_ratio)
@@ -74,13 +166,27 @@ class ChamberContour:
         L_cone_c = (Rc - r_tu) / np.tan(beta)
         L_arc_u = rho_u * np.sin(beta)
 
-        # Downstream arc to divergence angle alpha, then cone to exit radius.
-        r_td = Rt + rho_d * (1.0 - np.cos(alpha))
-        L_arc_d = rho_d * np.sin(alpha)
-        L_cone_d = max(Re - r_td, 0.0) / np.tan(alpha)
-
         x_throat = chamber_length + L_cone_c + L_arc_u
-        x_exit = x_throat + L_arc_d + L_cone_d
+
+        # Divergent section: conical (straight) or a thrust-optimized bell.
+        if nozzle_type == "conical":
+            r_td = Rt + rho_d * (1.0 - np.cos(alpha))
+            L_arc_d = rho_d * np.sin(alpha)
+            L_cone_d = max(Re - r_td, 0.0) / np.tan(alpha)
+            x_exit = x_throat + L_arc_d + L_cone_d
+            theta_exit = alpha
+
+            def div_r(xi: float) -> float:
+                if xi <= x_throat + L_arc_d:
+                    dx = xi - x_throat
+                    return Rt + rho_d - np.sqrt(max(rho_d**2 - dx**2, 0.0))
+                return r_td + (xi - (x_throat + L_arc_d)) * np.tan(alpha)
+        else:
+            xb, rb, x_exit, theta_exit = _bell_divergent(
+                Rt, Re, rho_d, expansion_ratio, bell_percent, x_throat)
+
+            def div_r(xi: float) -> float:
+                return float(np.interp(xi, xb, rb))
 
         def r_of_x(x: np.ndarray) -> np.ndarray:
             r = np.empty_like(x)
@@ -93,11 +199,8 @@ class ChamberContour:
                     # upstream arc, center at (x_throat, Rt + rho_u)
                     dx = x_throat - xi
                     r[i] = Rt + rho_u - np.sqrt(max(rho_u**2 - dx**2, 0.0))
-                elif xi <= x_throat + L_arc_d:
-                    dx = xi - x_throat
-                    r[i] = Rt + rho_d - np.sqrt(max(rho_d**2 - dx**2, 0.0))
                 else:
-                    r[i] = r_td + (xi - (x_throat + L_arc_d)) * np.tan(alpha)
+                    r[i] = div_r(xi)
             return r
 
         self.x = np.linspace(0.0, x_exit, n_points)
@@ -116,6 +219,23 @@ class ChamberContour:
         # different arcs the mean is common practice (e.g. Huzel & Huang).
         self.r_curv_throat = 0.5 * (rho_u + rho_d)
         self.length = x_exit
+        self.nozzle_type = nozzle_type
+        self.bell_percent = bell_percent if nozzle_type == "bell" else 1.0
+        #: wall angle at the nozzle exit lip [deg] — the divergence-loss driver
+        self.theta_exit_deg = float(np.degrees(theta_exit))
+
+    def divergence_efficiency(self) -> float:
+        """Nozzle divergence (angularity) efficiency lambda in (0, 1].
+
+        The axial-thrust fraction of the exit momentum for a radially
+        diverging supersonic exhaust, ``lambda = 0.5 (1 + cos theta)`` with
+        ``theta`` the exit-lip wall half-angle (Sutton & Biblarz eq. 3-34;
+        Huzel & Huang eq. 4-7). A 15-deg cone gives 0.983; a bell's small
+        exit angle recovers most of that ~1.7% loss — which is exactly why
+        bells are used. This is the standard preliminary-design correction;
+        it is NOT a method-of-characteristics contour optimization.
+        """
+        return 0.5 * (1.0 + np.cos(np.radians(self.theta_exit_deg)))
 
     def area_ratio(self) -> np.ndarray:
         """Local A/At along the contour."""

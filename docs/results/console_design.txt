@@ -4,57 +4,59 @@ designing 'demo-5kN-methalox': 5.0 kN lox/ch4 at Pc 20 bar (deterministic encode
   [0. setup] materials/process: liner cucrzr (k=330 W/mK, T_limit=800 K), closeout 316L, process lpbf (laser powder-bed fusion)
   [0. setup] coolant inlet temperature: 118 K: 3 K subcooled below saturation at 2 bar (typical run-tank condition)
   [A. performance] expansion ratio: perfect expansion at Pa = 101.3 kPa -> area ratio 3.90
-  [A. performance] throat sizing: eta_c*=0.95, eta_Cf=0.97 (Huzel & Huang typical) -> c*=1727 m/s, Cf=1.380, At=18.11 cm^2 (Dt 48.0 mm), mdot=2.098 kg/s, Isp=243 s
-  [A. performance] contraction ratio: throat D 48.0 mm -> contraction ratio 12.1 (small-engine sizing trend, clipped to [4, 15])
+  [A. performance] nozzle contour: bell nozzle (80% bell): divergence efficiency lambda=0.9917 vs 0.9830 for a 15-deg cone (+0.9% Cf) — Rao thrust-optimized-parabola approximation
+  [A. performance] throat sizing: eta_c*=0.95, eta_Cf=0.979 (friction 0.987 x divergence 0.992) -> c*=1727 m/s, Cf=1.393, At=17.95 cm^2 (Dt 47.8 mm), mdot=2.079 kg/s, Isp=245 s
+  [A. performance] contraction ratio: throat D 47.8 mm -> contraction ratio 12.1 (small-engine sizing trend, clipped to [4, 15])
   [A. performance] L*: characteristic length L* = 1.1 m (lox/ch4 class value, Huzel & Huang table 4-1 range)
   [A. performance] chamber length: L_c = 0.8 L*/CR = 73 mm (cylindrical section; convergent cone supplies the remaining chamber volume)
   [B. thermal] feed pressure: coolant feed 60 bar = (Pc + injector drop + manifold allowance + jacket budget 30 bar) x 1.10 line margin
-  [B. thermal] channel search: 45 regen solves -> 167 channels 0.50x2.12 mm, wall 0.40 mm: peak T_wg 676 K, dP 15.4 bar
-  [C. injector] injection states: ox: 94 K, 1135 kg/m^3; fuel from regen outlet: 523 K, 16 kg/m^3 at 45 bar
+  [B. thermal] channel search: 45 regen solves -> 162 channels 0.50x2.26 mm, wall 0.40 mm: peak T_wg 602 K, dP 11.6 bar
+  [C. injector] injection states: ox: 94 K, 1135 kg/m^3; fuel from regen outlet: 486 K, 19 kg/m^3 at 48 bar
   [C. injector] sizing: spray half-angle target 45 deg -> phi=0.463, A=2.41, Cd=0.254 (ideal max-flow theory)
   [C. injector] sizing: 3 elements from ~1.5 kN per element
-  [C. injector] sizing: film cooling: 10% of fuel through 169 holes on the wall ring
-  [C. injector] warning: fuel density 16 kg/m^3 is gas-like (supercritical regen outlet): incompressible orifice equation is approximate
-  [D. manifolds] torus headers: inlet duct 8.0 mm (1 feeders), outlet 25.5 mm (1), clocking 0 deg -> maldistribution 0.9%
-  [E. structure] closeout shell: hoop stress at MAWP 60 bar on r 86 mm vs 316L allowable 115 MPa (x1.25) -> t = 5.61 mm (1 mm print floor)
+  [C. injector] sizing: film cooling: 10% of fuel through 154 holes on the wall ring
+  [C. injector] warning: fuel density 19 kg/m^3 is gas-like (supercritical regen outlet): incompressible orifice equation is approximate
+  [D. manifolds] torus headers: inlet duct 8.5 mm (1 feeders), outlet 23.5 mm (1), clocking 0 deg -> maldistribution 0.7%
+  [E. structure] closeout shell: hoop stress at MAWP 60 bar on r 86 mm vs 316L allowable 115 MPa (x1.25) -> t = 5.60 mm (1 mm print floor)
   [done] converged: all 7 ledger constraints satisfied after 1 iteration(s)
-  (56.6 s)
+  (57.7 s)
 
 Engine design 'demo-5kN-methalox' (converged in 1 iteration(s))
 ========================================================================
   thrust (design ambient)            5.00 kN
   chamber pressure                   20.0 bar
   propellants / O/F                  lox/ch4 / 3.20
-  mass flow (ox + fuel)              2.098 kg/s (1.599 + 0.500)
-  Isp (design ambient / vacuum)      243 / 277 s
-  c* (delivered) / Cf                1727 m/s / 1.380
-  throat / exit diameter             48.0 / 94.8 mm
+  mass flow (ox + fuel)              2.079 kg/s (1.584 + 0.495)
+  Isp (design ambient / vacuum)      245 / 279 s
+  c* (delivered) / Cf                1727 m/s / 1.393
+  throat / exit diameter             47.8 / 94.4 mm
+  nozzle                             bell (80% bell), exit angle 10.5deg, divergence eff. 0.992
   expansion / contraction ratio      3.9 / 12.1
   chamber length / L*                73 mm / 1.10 m
-  cooling channels                   167 x 0.50 x 2.12 mm, hot wall 0.40 mm
-  peak hot-wall temperature          676 K
-  jacket pressure drop               15.4 bar
-  coolant outlet (injector inlet)    523 K
+  cooling channels                   162 x 0.50 x 2.26 mm, hot wall 0.40 mm
+  peak hot-wall temperature          602 K
+  jacket pressure drop               11.6 bar
+  coolant outlet (injector inlet)    486 K
   coolant feed pressure              60 bar
   injector                           3 coax-swirl elements, stiffness 20% Pc
-  manifold maldistribution           0.9% (target 3%)
-  closeout shell                     5.61 mm 316L
+  manifold maldistribution           0.7% (target 3%)
+  closeout shell                     5.60 mm 316L
 Constraint ledger:
-  [PASS] peak hot-wall temperature: 676 K (req: <= 800 K (cucrzr))
-  [PASS] jacket pressure drop: 15.4 bar (req: <= 30 bar budget)
+  [PASS] peak hot-wall temperature: 602 K (req: <= 800 K (cucrzr))
+  [PASS] jacket pressure drop: 11.6 bar (req: <= 30 bar budget)
   [PASS] single-phase coolant: single-phase/supercritical (req: no boiling in the jacket)
-  [PASS] land at throat: 0.42 mm (req: >= 0.4 mm (lpbf))
-  [PASS] injector tangential ports: d 5.53 mm (req: >= 0.4 mm (lpbf))
-  [PASS] injector supply pressure: regen outlet 44.7 bar (req: >= Pc + drop = 24.0 bar)
-  [PASS] channel-flow uniformity: 0.9% (req: <= 3% (design target))
+  [PASS] land at throat: 0.44 mm (req: >= 0.4 mm (lpbf))
+  [PASS] injector tangential ports: d 5.51 mm (req: >= 0.4 mm (lpbf))
+  [PASS] injector supply pressure: regen outlet 48.5 bar (req: >= Pc + drop = 24.0 bar)
+  [PASS] channel-flow uniformity: 0.7% (req: <= 3% (design target))
 
   figures written
   meshing chamber jacket at 1.0 mm voxels ...
-  chamber_jacket.stl: 1228022 tris, watertight, V 797.9 cm^3, mass 7.102 kg, voxel 1.00 mm, bbox 292x249x224 mm
+  chamber_jacket.stl: 1171864 tris, watertight, V 780.5 cm^3, mass 6.946 kg, voxel 1.00 mm, bbox 274x243x220 mm
   meshing injector head at 0.6 mm voxels ...
-  injector_head.stl: 669744 tris, watertight, V 934.8 cm^3, mass 7.460 kg, voxel 0.60 mm, bbox 43x175x175 mm
+  injector_head.stl: 759020 tris, watertight, V 1135.3 cm^3, mass 9.059 kg, voxel 0.60 mm, bbox 86x176x176 mm
   assembling multi-shell engine ...
-  engine_assembly.stl: 1897766 tris, watertight, V 1732.7 cm^3, mass n/a, voxel 1.00 mm, bbox 322x249x224 mm
+  engine_assembly.stl: 1930884 tris, watertight, V 1915.8 cm^3, mass n/a, voxel 1.00 mm, bbox 347x243x220 mm
   report written
 
 written:

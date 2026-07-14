@@ -9,8 +9,11 @@ from cryosim.chamber_geometry import ChamberContour, CoolingChannels
 from cryosim.voxel_geometry import (
     Cylinder,
     CylinderX,
+    HalfSpaceX,
     HelicalChannels,
     RingHolesX,
+    SmoothDifference,
+    SmoothUnion,
     Sphere,
     TorusX,
     build_chamber_jacket,
@@ -18,6 +21,7 @@ from cryosim.voxel_geometry import (
     concat_meshes,
     mesh_qa,
     mesh_solid,
+    smooth_union,
 )
 
 
@@ -109,6 +113,53 @@ def test_concat_meshes_watertight_and_additive():
     assert both.volume() == pytest.approx(a.volume() + b.volume(), rel=1e-9)
 
 
+def test_smooth_union_adds_fillet_and_stays_watertight():
+    a = Sphere((-0.015, 0, 0), 0.02)
+    b = Sphere((0.015, 0, 0), 0.02)
+    hard = mesh_solid(a | b, (-0.04, -0.025, -0.025), (0.04, 0.025, 0.025),
+                      0.001)
+    soft = mesh_solid(SmoothUnion(a, b, 0.01), (-0.04, -0.025, -0.025),
+                      (0.04, 0.025, 0.025), 0.001)
+    assert soft.is_watertight()
+    # the fillet fills the neck, so the smooth union has more material
+    assert soft.volume() > hard.volume()
+
+
+def test_smooth_union_reduces_to_hard_union_as_k_shrinks():
+    a = Sphere((-0.015, 0, 0), 0.02)
+    b = Sphere((0.015, 0, 0), 0.02)
+    hard = mesh_solid(a | b, (-0.04, -0.025, -0.025), (0.04, 0.025, 0.025),
+                      0.001).volume()
+    tiny = mesh_solid(SmoothUnion(a, b, 1e-5), (-0.04, -0.025, -0.025),
+                      (0.04, 0.025, 0.025), 0.001).volume()
+    assert tiny == pytest.approx(hard, rel=0.02)
+
+
+def test_smooth_union_helper_folds_list():
+    parts = [Sphere((0.02 * i, 0, 0), 0.015) for i in range(3)]
+    m = mesh_solid(smooth_union(parts, 0.008), (-0.02, -0.02, -0.02),
+                   (0.06, 0.02, 0.02), 0.001)
+    assert m.is_watertight()
+
+
+def test_smooth_difference_watertight():
+    body = Sphere((0, 0, 0), 0.03)
+    tool = CylinderX(-1, 1, 0.012)
+    m = mesh_solid(SmoothDifference(body, tool, 0.006),
+                   (-0.04, -0.04, -0.04), (0.04, 0.04, 0.04), 0.001)
+    assert m.is_watertight()
+    assert m.volume() > 0
+
+
+def test_halfspace_cut_halves_volume():
+    full = mesh_solid(Sphere((0, 0, 0), 0.03), (-0.035,) * 3, (0.035,) * 3,
+                      0.0012)
+    half = mesh_solid(Sphere((0, 0, 0), 0.03) & HalfSpaceX(0.0, below=True),
+                      (-0.035,) * 3, (0.035,) * 3, 0.0012)
+    assert half.is_watertight()
+    assert half.volume() == pytest.approx(0.5 * full.volume(), rel=0.03)
+
+
 def test_empty_solid_raises():
     with pytest.raises(ValueError, match="empty"):
         mesh_solid(Sphere((10, 10, 10), 0.001), (0, 0, 0),
@@ -147,7 +198,27 @@ def test_injector_head_watertight():
     inj = design_injector(Pc=20e5, thrust=3e3, mdot_ox=0.9, mdot_fuel=0.3,
                           rho_ox=1140.0, mu_ox=2.0e-4, rho_fuel=400.0,
                           face_radius=0.04, film_fraction=0.0)
-    solid, lo, hi = build_injector_head(inj)
-    m = mesh_solid(solid, lo, hi, 0.0004)
+    solid, lo, hi = build_injector_head(inj)          # domed (blend default)
+    m = mesh_solid(solid, lo, hi, 0.0005)
+    assert m.is_watertight()
+    assert m.volume() > 0
+    # the dome extends the head behind the barrel (x below the face plane)
+    assert lo[0] < -1e-3
+
+
+def test_organic_bell_jacket_with_manifolds_watertight():
+    from cryosim.manifold_design import design_manifolds
+    contour = ChamberContour(throat_radius=0.014, contraction_ratio=6.0,
+                             expansion_ratio=3.5, chamber_length=0.05,
+                             nozzle_type="bell", n_points=140)
+    channels = CoolingChannels(n_channels=50, channel_width=1.0e-3,
+                               channel_height=2.0e-3, t_wall=0.6e-3)
+    man = design_manifolds(contour, channels, mdot_coolant=0.4,
+                           dp_channel=12e5, rho_in=420.0, mu_in=1.0e-4,
+                           rho_out=25.0, mu_out=2.0e-5, mawp=60e5,
+                           material="316L")
+    solid, lo, hi = build_chamber_jacket(contour, channels, 1.5e-3, man,
+                                         blend=3.0e-3)
+    m = mesh_solid(solid, lo, hi, 0.0008)
     assert m.is_watertight()
     assert m.volume() > 0

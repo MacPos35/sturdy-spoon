@@ -229,9 +229,11 @@ fuel where the incompressible orifice equation degrades.
 ### Autonomous design pipeline (`cryosim/engine_design.py`)
 
 Stage A performance sizing (ideal `c*`/`Cf` from the isentropic relations ×
-fixed efficiencies 0.95/0.97, perfect-expansion area ratio with a
-Summerfield separation guard and vacuum cap, contraction-ratio and L*
-rules) → stage B thermal (`optimize_channels` under the Δp budget with
+fixed efficiencies — `c*` 0.95, and a nozzle factor split into friction
+0.987 × **divergence efficiency λ** so a bell earns a separable gain —
+perfect-expansion area ratio with a Summerfield separation guard and vacuum
+cap, contraction-ratio and L* rules; a **thrust-optimized bell** contour by
+default) → stage B thermal (`optimize_channels` under the Δp budget with
 process feature floors) → stage C injector (fed the stage-B regen outlet
 state) → stage D manifolds → stage E closeout hoop stress (Barlow ×1.25 vs
 `line_sizing.MATERIALS`). A constraint ledger (wall temperature, Δp,
@@ -239,11 +241,27 @@ single-phase coolant, land width, port size, supply pressure, flow
 uniformity) drives ordered repair rules; failure is loud and carries the
 ledger. Every decision lands in the design trace.
 
+### Nozzle contour (`cryosim/chamber_geometry.py`)
+
+The divergent section is either a straight cone or, by default, a
+**thrust-optimized bell** built by Rao's parabolic-approximation method: a
+downstream throat arc swept to the parabola-start angle θ_n, then a
+quadratic-Bézier parabola to the exit lip at angle θ_e (θ_n/θ_e from a
+documented fit to Rao's 80%-bell chart — the exact chart isn't reproducible
+offline). The bell is ~80% the length of a 15° cone and recovers most of
+its divergence loss: divergence efficiency `λ = 0.5(1 + cos θ_exit)` (Sutton
+eq. 3-34) rises from 0.983 (15° cone) to ~0.99–1.00, a ~0.7–1.5% Cf/Isp
+gain that the pipeline credits. This is the standard preliminary-design
+angularity correction, **not** a method-of-characteristics contour.
+
 ### Voxel geometry (`cryosim/voxel_geometry.py`)
 
 Implicit solids (signed-distance-style fields: revolved profiles, helical
-channel bands, tori, arbitrary cylinders, hole rings) composed with
-min/max booleans, sampled on a padded voxel grid, meshed with marching
+channel bands, tori, arbitrary cylinders, spheres, hole rings, half-spaces)
+composed with hard **or smooth (filleted) booleans** — Quílez's polynomial
+smooth-min gives the organic, "grown" transitions where the torus manifolds
+blend into the chamber wall and the injector's spherical propellant **dome**
+blends onto its barrel. Sampled on a padded voxel grid, meshed with marching
 cubes (scikit-image), written as binary STL with watertightness
 (edge-pairing), volume (divergence theorem) and mass QA. Voxel-limited
 fidelity: features under ~2 voxels round off or close — stated per part in
@@ -287,6 +305,7 @@ numbers.
 | Gimbal/TVC | Linear control theory + slosh-vehicle equations (SP-8009 ch. 4 / Dodge 2000 ch. 5 formulation) | Closed-loop eigen-structure (slosh pair at ω_s, pole placement at requested bandwidth), gust recovery, gain scaling with inertia | **Verified vs linear theory**; no experimental TVC dataset used — no aero, planar, rigid body |
 | Manifold design | Bajura & Jones (1976) header theory; toroidal-shell membrane stress (Roark) | Dividing/combining pressure-profile shapes and symmetry, uniformity improving with duct area and channel stiffness (the literature's area-ratio trend), torus wall → cylinder limit as R/r → ∞ | **Verified vs the classical theory's trends**; k_m = 0.7 is the literature mid-range, not calibrated to a rocket dataset |
 | Injector (swirl theory) | Bazarov/Yang/Puri ch. 2 closed forms; classical `mu(A)`/spray-angle charts | Hand-evaluated relation set, exact maximum-flow round-trip, chart anchor at A = 1 (mu ≈ 0.44, half-angle ≈ 33°), monotonic swirl trends, per-element flow closure | **Implementation-verified vs the ideal theory** — inviscid; real injectors run a few % lower Cd / narrower cone; NOT hot-fire validated, no stability prediction |
+| Nozzle (bell contour) | Rao TOP parabolic-approximation method; angularity efficiency `0.5(1+cosθ)` (Sutton eq. 3-34) | Exit radius = Rt√ε and exit area ratio exact, bell shorter than the 15° cone, θ_exit and λ monotonic in ε, λ(cone)=0.983 exact, bell λ>cone | **Verified vs the parabolic method + angularity model**; θ_n/θ_e are a documented chart *fit*, not MOC — geometry and the ~1% Cf credit are representative, not a point design |
 | Design pipeline | Sutton/Huzel & Huang closed-form performance relations | c*/Cf hand checks, thrust closure `F = Cf Pc At` (exact), mass/mixture balance, plausibility bands for the 5 kN demo, exact determinism of two identical runs | **Rule-level verified**; the rules encode kN-class practice — outputs inherit each sub-model's validation status; the printed engine is a *concept*, not a qualified design |
 | Voxel geometry | Analytic volumes (sphere, torus, tube, oblique cylinder, helical channel band) | Volumes within ~2–3 % at test resolution, closed-mesh (edge-pairing) invariant on every part incl. the full jacket and injector head, STL byte-level round-trip | **Verified vs analytic references**; fidelity is voxel-limited (stated per part) |
 
@@ -309,8 +328,9 @@ numbers.
   gas composition, calorically-perfect isentropic relations; adiabatic
   closeout; radiation neglected; **no boiling model** — two-phase coolant
   states are flagged (`boiling_detected`), not resolved, and transcritical
-  heat-transfer deterioration near the pseudo-critical point is not modeled;
-  conical (not bell) divergent section.
+  heat-transfer deterioration near the pseudo-critical point is not modeled.
+  The regen heat-transfer march is quasi-1D and contour-shape agnostic, so it
+  applies equally to the conical and bell divergent options.
 * **Coupling**: quasi-steady regen; mixing knob unvalidated (above);
   oxidizer tank represented only through the mixture ratio (model the ox
   tank by running a second instance with `coolant_is_fuel: false`).
@@ -321,8 +341,12 @@ numbers.
 * **Design pipeline**: deterministic rules encoding kN-class practice;
   film cooling is sized hydraulically but its thermal benefit is NOT
   credited in the regen solution (conservative); performance via fixed
-  efficiency factors, not CEA-coupled; the STLs are voxel-limited
-  visual/print concepts, not toleranced CAD.
+  efficiency factors, not CEA-coupled; the bell contour is Rao's parabolic
+  *approximation* with chart-fit angles (not a method-of-characteristics
+  design), and its divergence-efficiency credit is the exit-angle angularity
+  factor only; the organic fillets/dome are geometry for the printable model,
+  not stress-optimized features; the STLs are voxel-limited visual/print
+  concepts, not toleranced CAD.
 * **P&ID recommender**: a checklist aid encoding common student-team
   practice; the schematic uses simplified ISA-5.1-style symbology and the
   architecture selector is transparent rules, not an optimizer over a cost

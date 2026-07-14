@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import yaml
 
-from .chamber_geometry import ChamberContour
+from .chamber_geometry import ChamberContour, nozzle_divergence_efficiency
 from .combustion import (CombustionGas, area_ratio_from_mach, gas_preset,
                          R_UNIV)
 from .fluids import Fluid
@@ -116,6 +116,8 @@ class EngineSpec:
     thrust_per_element: float = 1.5e3   # N
     expansion_ratio_cap: float = 25.0   # vacuum-design cap
     helix_angle_deg: float = 0.0
+    nozzle_type: str = "bell"           # "bell" (thrust-optimized) | "conical"
+    bell_percent: float = 0.8           # bell length vs 15-deg cone reference
     name: str = "engine"
 
     @classmethod
@@ -129,7 +131,8 @@ class EngineSpec:
             # YAML 1.1 reads '2.0e3' (no sign) as a string — coerce all
             # non-string spec fields
             if k not in ("propellants", "liner", "closeout_material",
-                         "process", "name", "combustion_gas") \
+                         "process", "name", "combustion_gas",
+                         "nozzle_type") \
                     and isinstance(v, str):
                 d[k] = float(v)
         if isinstance(d.get("combustion_gas"), dict):
@@ -261,6 +264,12 @@ class EngineDesign:
             ("throat / exit diameter",
              f"{2*self.throat_radius*1e3:.1f} / "
              f"{2*e.r[-1]*1e3:.1f} mm"),
+            ("nozzle",
+             f"{e.nozzle_type}"
+             + (f" ({e.bell_percent*100:.0f}% bell)"
+                if e.nozzle_type == "bell" else "")
+             + f", exit angle {e.theta_exit_deg:.1f}deg, "
+             f"divergence eff. {e.divergence_efficiency():.3f}"),
             ("expansion / contraction ratio",
              f"{self.expansion_ratio:.1f} / {self.contraction_ratio:.1f}"),
             ("chamber length / L*",
@@ -424,10 +433,13 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         Pc, Pa = spec.chamber_pressure, spec.ambient_pressure
         eps, why = _optimum_expansion(gas, Pc, Pa, spec.expansion_ratio_cap)
         log("A. performance", "expansion ratio", why)
-        eta_cstar, eta_cf = 0.95, 0.97
+        # Nozzle efficiency, split so the bell earns a real, separable gain:
+        # total = friction/quality x divergence(lambda); for a 15-deg cone
+        # 0.987 x 0.983 = 0.970 (the classic lumped value), a bell recovers
+        # most of the 1.7% divergence loss.
+        eta_cstar, eta_friction = 0.95, 0.987
         cstar = _c_star(gas) * eta_cstar
         Cf, Pe = _thrust_coefficient(gas, Pc, eps, Pa)
-        Cf *= eta_cf
         if Pa > 5e3 and Pe < 0.4 * Pa:
             # Summerfield separation guard (only reachable via the cap)
             log("A. performance", "separation guard",
@@ -437,7 +449,18 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
             eps = _brentq(lambda e: _thrust_coefficient(gas, Pc, e, Pa)[1]
                           - 0.4 * Pa, 1.5, eps)
             Cf, Pe = _thrust_coefficient(gas, Pc, eps, Pa)
-            Cf *= eta_cf
+        lam = nozzle_divergence_efficiency(eps, spec.nozzle_type,
+                                           spec.bell_percent)
+        lam_cone = nozzle_divergence_efficiency(eps, "conical")
+        eta_cf = eta_friction * lam
+        Cf *= eta_cf
+        log("A. performance", "nozzle contour",
+            f"{spec.nozzle_type} nozzle"
+            + (f" ({spec.bell_percent*100:.0f}% bell)"
+               if spec.nozzle_type == "bell" else "")
+            + f": divergence efficiency lambda={lam:.4f} vs {lam_cone:.4f} "
+            f"for a 15-deg cone (+{(lam/lam_cone-1)*100:.1f}% Cf) — "
+            "Rao thrust-optimized-parabola approximation")
         At = spec.thrust / (Cf * Pc)
         Rt = float(np.sqrt(At / np.pi))
         mdot = Pc * At / cstar
@@ -445,10 +468,10 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         Cf_vac, _ = _thrust_coefficient(gas, Pc, eps, 0.0)
         Isp_vac = Cf_vac * eta_cf * cstar / G0
         log("A. performance", "throat sizing",
-            f"eta_c*={eta_cstar}, eta_Cf={eta_cf} (Huzel & Huang typical) "
-            f"-> c*={cstar:.0f} m/s, Cf={Cf:.3f}, At={At*1e4:.2f} cm^2 "
-            f"(Dt {2e3*Rt:.1f} mm), mdot={mdot:.3f} kg/s, "
-            f"Isp={Isp:.0f} s")
+            f"eta_c*={eta_cstar}, eta_Cf={eta_cf:.3f} (friction "
+            f"{eta_friction} x divergence {lam:.3f}) -> c*={cstar:.0f} m/s, "
+            f"Cf={Cf:.3f}, At={At*1e4:.2f} cm^2 (Dt {2e3*Rt:.1f} mm), "
+            f"mdot={mdot:.3f} kg/s, Isp={Isp:.0f} s")
         cr, why = _contraction_ratio_rule(Rt)
         log("A. performance", "contraction ratio", why)
         Lstar, why = _l_star_rule(spec.propellants)
@@ -460,7 +483,8 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
             "convergent cone supplies the remaining chamber volume)")
         contour = ChamberContour(
             throat_radius=Rt, contraction_ratio=cr, expansion_ratio=eps,
-            chamber_length=Lc)
+            chamber_length=Lc, nozzle_type=spec.nozzle_type,
+            bell_percent=spec.bell_percent)
         mdot_fuel = mdot / (1.0 + of)
         mdot_ox = mdot - mdot_fuel
 

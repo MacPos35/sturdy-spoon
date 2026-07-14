@@ -137,3 +137,6 @@ def test_example_spec_parses():
     spec = EngineSpec.from_yaml("examples/engine_5kn_methalox.yaml")
     assert spec.thrust == 5e3
     assert spec.propellants == "lox/ch4"
+    # string-valued fields must survive the numeric-coercion pass
+    assert spec.nozzle_type == "bell"
+    assert isinstance(spec.bell_percent, float)

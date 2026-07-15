@@ -329,23 +329,30 @@ that first tier:
 
 | Sub-model | Industry-standard method | cryosim | Standing |
 |---|---|---|---|
-| Combustion | NASA CEA — Gibbs-min equilibrium, shifting/frozen | 8-species Gibbs-min + shifting expansion | **Same method**, within ~2–3% of CEA (fewer species, no soot) |
-| Nozzle contour | Rao thrust-optimized parabola (prelim); MOC (final) | Rao parabolic approximation | **Standard preliminary**; MOC is the higher tier |
+| Combustion | NASA CEA — Gibbs-min equilibrium, shifting/frozen | 10-species Gibbs-min + shifting expansion + soot-onset | **Same method**, within ~2–3% of CEA; condensed-carbon boundary flagged (not resolved) |
+| Nozzle contour | Rao parabola (prelim); **method of characteristics (final)** | Rao parabola **or MOC** (`nozzle_type: moc`, λ≈1) | **Both tiers** — MOC gives the uniform-axial-exit optimum |
 | Nozzle performance | Cf × angularity(λ) × friction efficiencies | identical | **Standard** |
 | Regen cooling | Bartz + Dittus–Boelter 1D (prelim); conjugate CFD (final) | identical | **Standard preliminary** |
-| Injector | Bazarov swirl theory + empirical Cd | identical | **Standard preliminary** (no atomization/stability) |
+| Regen life | Thermal stress + Manson–Coffin LCF (final) | closed-form thermal/pressure stress + Manson–Coffin | **Final-design analytical** (not 3-D FEA) |
+| Injector | Bazarov swirl theory + empirical Cd | identical | **Standard preliminary** |
+| Stability | Acoustic-mode + n–τ screen (final); nonlinear CFD (research) | chamber L/T/R modes + injector-coupling screen | **Final-design screen** (linear, not nonlinear sim) |
 | Manifolds | Bajura–Jones header theory | identical | **Standard** |
 | Structures | Barlow/hoop stress + ASME allowables | identical | **Standard** |
 | Slosh / TVC | NASA SP-8009 pendulum analog + linear control | identical | **Standard** (the accepted linear reference) |
 | AM geometry | Implicit/voxel kernel (PicoGK-class) | small PicoGK-like kernel | **Emerging industry standard** (LEAP 71/nTop lineage) |
 
-So: **the methods are industry-standard for preliminary design, correctly
-implemented and cross-checked** (`cryosim benchmark` puts 22 computed
-numbers next to NIST/CEA/textbook references; all within tolerance/band).
-Where it is deliberately *not* "better than industry" is fidelity: it does
-not replace full CEA, MOC, CFD or FEA, and it should not be used to qualify
-flight hardware. It is faster and more transparent than those tools, which
-is the point of the tier — not a substitute for them.
+So: **the methods are industry-standard, correctly implemented and
+cross-checked** (`cryosim benchmark` puts 28 computed numbers next to
+NIST/CEA/Anderson/textbook references; all within tolerance/band). Four
+subsystems now carry a **final-design-tier** method — a true
+method-of-characteristics nozzle, thermal-stress + low-cycle-fatigue life,
+soot-onset (condensed-carbon) prediction, and an acoustic combustion-
+stability screen. What remains deliberately out of scope (needs dedicated
+solvers/compute/validation data) is the *high-fidelity-solver* tier: full
+CEA with all condensed species, RANS/LES CFD, 3-D conjugate heat transfer,
+qualification-grade FEA, and finite-rate kinetics. This tool is faster and
+more transparent than those; it does not replace them, and it should not be
+used to qualify flight hardware.
 
 ## Validation status — read this before trusting numbers
 

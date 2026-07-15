@@ -281,6 +281,35 @@ def render_report(design: EngineDesign, qa: list[MeshQA],
         lines += ["", f"## Manufacturing & modeling notes "
                   f"(process: {design.spec.process.upper()})", ""]
         lines += [f"- {n}" for n in notes]
+
+    ts = design.thermostructural
+    if ts is not None:
+        lines += ["", "## Thermo-structural & cycle life (final-design)", "",
+                  f"- hot-wall stress: **{ts.peak_stress/1e6:.0f} MPa** peak "
+                  f"(thermal {ts.sigma_thermal.max()/1e6:.0f} + pressure "
+                  f"{ts.sigma_pressure.max()/1e6:.0f}); min yield margin "
+                  f"**{ts.min_margin*100:.0f}%**",
+                  f"- low-cycle-fatigue life: **{ts.cycle_life:.0f} cycles** "
+                  f"(Manson–Coffin, peak strain range {ts.delta_eps_max*100:.2f}%)",
+                  "- closed-form thin-wall stresses (not 3-D FEA); "
+                  "representative material constants — see module docstring."]
+    st = design.stability
+    if st is not None:
+        modes = " · ".join(f"{k} {v/1e3:.1f} kHz"
+                           for k, v in list(st.modes.items())[:5])
+        lines += ["", "## Combustion-stability screen (final-design)", "",
+                  f"- chamber acoustic modes: {modes}",
+                  f"- injector stiffness {st.stiffness*100:.0f}% Pc "
+                  f"({'adequate' if st.stiffness_ok else '**LOW**'} vs the "
+                  "15% chug guard)"]
+        if st.sensitive_modes:
+            lines.append(f"- ⚠️ mode(s) in the n–τ sensitive band: "
+                         f"**{', '.join(st.sensitive_modes)}** — a linear "
+                         "screen flag; verify with a combustion-response "
+                         "(n–τ) analysis, add baffles/cavities if confirmed.")
+        for note in st.notes:
+            lines.append(f"  - {note}")
+
     if with_geometry:
         lines += ["", "## Generated geometry (binary STL, mm)", ""]
         for q in qa:

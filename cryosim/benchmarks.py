@@ -194,6 +194,47 @@ def run_benchmarks(full: bool = False) -> list[BenchmarkRow]:
                        "ASME B31.3 basis: 2/3 x 25 ksi L-grade yield",
                        tol=0.01))
 
+    # -------------------------------------- final-design tier methods
+    from .moc_nozzle import design_moc_nozzle, prandtl_meyer
+    from .chamber_geometry import nozzle_divergence_efficiency
+    moc = design_moc_nozzle(1.2, 8.0, r_throat=0.02, n_char=60)
+    assert abs(moc.exit_angle_deg) < 1e-2      # uniform axial exit by design
+    rows.append(_point("nozzle (MOC)", "theta_max vs nu(Me)/2",
+                       moc.theta_max_deg,
+                       0.5 * np.degrees(prandtl_meyer(moc.exit_mach, 1.2)),
+                       "deg", "Anderson ch. 11: θmax = ν(Me)/2 for the MLN",
+                       kind="exact", tol=1e-6))
+    rows.append(_point("nozzle (MOC)", "divergence eff. lambda (axial exit)",
+                       nozzle_divergence_efficiency(8.0, "moc"), 1.0, "-",
+                       "uniform axial exit → no angularity loss",
+                       kind="exact", tol=1e-9))
+
+    from .thermostructural import (STRUCTURAL, manson_coffin_life,
+                                   yield_at)
+    m = STRUCTURAL["cucrzr"]
+    sig = m["E"] * m["alpha"] * 200.0 / (2 * (1 - m["nu"]))
+    rows.append(_point("thermo-structural", "hot-wall thermal stress @ΔT=200K",
+                       sig / 1e6,
+                       m["E"] * m["alpha"] * 200.0 / (2 * (1 - m["nu"])) / 1e6,
+                       "MPa", "Eα ΔT/(2(1−ν)) — Huzel & Huang / NASA CR-72",
+                       kind="exact", tol=1e-9))
+    rows.append(_band("thermo-structural", "LCF life @ Δε=1% (CuCrZr class)",
+                      manson_coffin_life(0.01, m), 300.0, 3000.0, "cycles",
+                      "Manson–Coffin; copper-liner regen chambers ~1e2–1e3"))
+
+    from .combustion_stability import _bessel_prime_root
+    rows.append(_point("stability", "1T acoustic mode root J'_1",
+                       _bessel_prime_root(1, 1), 1.8412, "-",
+                       "first-tangential mode: root of J'_1 (SP-194)",
+                       kind="exact", tol=1e-3))
+
+    from .combustion_equilibrium import equilibrium_combustion
+    of_soot = next(o for o in np.arange(1.0, 2.0, 0.05)
+                   if not equilibrium_combustion("ch4", o, 20e5).soot_predicted)
+    rows.append(_band("combustion (equil.)", "LOX/CH4 soot-onset O/F",
+                      of_soot, 1.1, 1.7, "-",
+                      "CEA condensed-carbon boundary (Boudouard); φ~2.4–3.6"))
+
     if not full:
         return rows
 

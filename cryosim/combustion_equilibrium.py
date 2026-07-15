@@ -74,18 +74,25 @@ _NASA7_HIGH = {
     "H":   (2.50000000e0, 0.0, 0.0, 0.0, 0.0, 2.54716270e4, -4.60117638e-1),
     "O":   (2.54205966e0, -2.75506191e-5, -3.10280335e-9, 4.55106742e-12,
             -4.36805150e-16, 2.92308027e4, 4.92030811e0),
+    # additional radicals (GRI-Mech 3.0 high-T) toward the full CEA set
+    "HO2": (4.01721090e0, 2.23982013e-3, -6.33658150e-7, 1.14246370e-10,
+            -1.07908535e-14, 1.11856713e2, 3.78510215e0),
+    "H2O2": (4.16500285e0, 4.90831694e-3, -1.90139225e-6, 3.71185986e-10,
+             -2.87908305e-14, -1.78617877e4, 2.91615662e0),
 }
 
 #: element vector [C, H, O] per species.
 _ELEMENTS = {
     "H2O": (0, 2, 1), "CO2": (1, 0, 2), "CO": (1, 0, 1), "H2": (0, 2, 0),
     "O2": (0, 0, 2), "OH": (0, 1, 1), "H": (0, 1, 0), "O": (0, 0, 1),
+    "HO2": (0, 1, 2), "H2O2": (0, 2, 2),
 }
 
 #: molar masses [kg/mol].
 _MOLAR = {
     "H2O": 18.0153e-3, "CO2": 44.0095e-3, "CO": 28.0101e-3, "H2": 2.01588e-3,
     "O2": 31.9988e-3, "OH": 17.0073e-3, "H": 1.00794e-3, "O": 15.9994e-3,
+    "HO2": 33.0067e-3, "H2O2": 34.0147e-3,
 }
 
 _SPECIES = list(_NASA7_HIGH)
@@ -173,11 +180,39 @@ class EquilibriumResult:
     cp: float                  # J/(kg K), frozen
     c_star: float              # m/s, ideal
     fuel: str
+    soot_predicted: bool = False   # carbon supersaturated (Boudouard) → soot
+    carbon_activity: float = 0.0   # a_C; ≥1 means solid carbon would form
 
     def as_gas(self) -> CombustionGas:
         """Package as the CombustionGas the regen/design code consumes."""
         return CombustionGas(T_c=self.T_c, gamma=self.gamma,
                              molar_mass=self.molar_mass)
+
+
+#: Graphite C(gr) NASA-7 (McBride/Gordon high-T, reference element ΔHf=0).
+_C_GRAPHITE = (1.45571830e0, 1.71700636e-3, -6.97564111e-7, 1.35277032e-10,
+               -9.67526407e-15, -6.95138814e2, -8.52583033e0)
+
+
+def _carbon_activity(T, P_bar, x):
+    """Carbon activity from the Boudouard equilibrium 2 CO ⇌ CO2 + C(gr).
+
+    a_C = K_p(T) · p_CO² / p_CO2 with K_p = exp(−ΔG°/RT); a_C ≥ 1 means the
+    gas is carbon-supersaturated and soot (solid carbon) would precipitate —
+    the standard soot-onset indicator (CEA's condensed-carbon boundary).
+    """
+    iCO = _SPECIES.index("CO")
+    iCO2 = _SPECIES.index("CO2")
+    xCO, xCO2 = x[iCO], x[iCO2]
+    if xCO <= 0 or xCO2 <= 0:
+        return 0.0
+    g = _g_RT(T)
+    g_C = _poly_H_RT(_C_GRAPHITE, T) - _poly_S_R(_C_GRAPHITE, T)
+    dG = g_C + g[iCO2] - 2.0 * g[iCO]       # ΔG°/RT for 2CO→CO2+C(gr)
+    Kp = np.exp(-dG)
+    p_CO = xCO * P_bar
+    p_CO2 = xCO2 * P_bar
+    return float(Kp * p_CO ** 2 / p_CO2)
 
 
 def _initial_moles(b):
@@ -302,12 +337,14 @@ def _package(T_c, Pc, b, fuel, of_ratio) -> EquilibriumResult:
     R_spec = R_UNIV / M
     gamma = cp_mass / (cp_mass - R_spec)
     gas = CombustionGas(T_c=T_c, gamma=gamma, molar_mass=M)
+    a_C = _carbon_activity(T_c, Pc / 1e5, x)
     return EquilibriumResult(
         T_c=T_c, P=Pc, of_ratio=of_ratio,
         mole_fractions={s: float(xi) for s, xi in zip(_SPECIES, x)
                         if xi > 1e-4},
         molar_mass=M, gamma=gamma, cp=cp_mass, c_star=gas.c_star,
-        fuel=fuel.name)
+        fuel=fuel.name, soot_predicted=bool(a_C >= 1.0),
+        carbon_activity=a_C)
 
 
 def _s_R(T):

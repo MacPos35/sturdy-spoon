@@ -58,7 +58,9 @@ def nozzle_divergence_efficiency(expansion_ratio: float, nozzle_type: str,
     scale). Same ``0.5(1 + cos theta_exit)`` model as
     :meth:`ChamberContour.divergence_efficiency`.
     """
-    if nozzle_type == "bell":
+    if nozzle_type == "moc":
+        theta_e = 0.0                       # uniform axial exit → λ = 1
+    elif nozzle_type == "bell":
         _, theta_e = _bell_angles(expansion_ratio, bell_percent)
     else:
         theta_e = np.radians(div_angle_deg)
@@ -143,11 +145,12 @@ class ChamberContour:
         n_points: int = 200,
         nozzle_type: str = "conical",
         bell_percent: float = 0.8,
+        gamma: float = 1.2,
     ):
         if contraction_ratio <= 1.0 or expansion_ratio < 1.0:
             raise ValueError("contraction_ratio must be > 1 and expansion_ratio >= 1")
-        if nozzle_type not in ("conical", "bell"):
-            raise ValueError("nozzle_type must be 'conical' or 'bell'")
+        if nozzle_type not in ("conical", "bell", "moc"):
+            raise ValueError("nozzle_type must be 'conical', 'bell' or 'moc'")
         Rt = throat_radius
         Rc = Rt * np.sqrt(contraction_ratio)
         Re = Rt * np.sqrt(expansion_ratio)
@@ -181,9 +184,21 @@ class ChamberContour:
                     dx = xi - x_throat
                     return Rt + rho_d - np.sqrt(max(rho_d**2 - dx**2, 0.0))
                 return r_td + (xi - (x_throat + L_arc_d)) * np.tan(alpha)
-        else:
+        elif nozzle_type == "bell":
             xb, rb, x_exit, theta_exit = _bell_divergent(
                 Rt, Re, rho_d, expansion_ratio, bell_percent, x_throat)
+
+            def div_r(xi: float) -> float:
+                return float(np.interp(xi, xb, rb))
+        else:  # method-of-characteristics (uniform axial exit)
+            from .moc_nozzle import design_moc_nozzle
+            # short throat arc to ~half the MOC start angle, then the MOC wall
+            moc = design_moc_nozzle(gamma, expansion_ratio, Rt,
+                                    x_throat=x_throat)
+            xb = np.concatenate([[x_throat], moc.x])
+            rb = np.concatenate([[Rt], moc.r])
+            x_exit = float(moc.x[-1])
+            theta_exit = np.radians(moc.exit_angle_deg)
 
             def div_r(xi: float) -> float:
                 return float(np.interp(xi, xb, rb))

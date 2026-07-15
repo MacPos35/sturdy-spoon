@@ -66,3 +66,11 @@ def test_extreme_off_stoich_does_not_crash():
     # very lean and very rich should still return (clamped) results
     assert equilibrium_combustion("ch4", 0.5, 20e5).T_c > 400
     assert equilibrium_combustion("ch4", 12.0, 20e5).T_c > 400
+
+
+def test_soot_predicted_only_when_very_rich():
+    # normal / lean operation: no soot; extreme rich: carbon supersaturated
+    assert not equilibrium_combustion("ch4", 3.2, 20e5).soot_predicted
+    assert not equilibrium_combustion("ch4", 2.0, 20e5).soot_predicted
+    rich = equilibrium_combustion("ch4", 1.0, 20e5)
+    assert rich.soot_predicted and rich.carbon_activity >= 1.0

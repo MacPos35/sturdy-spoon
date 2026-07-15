@@ -66,6 +66,8 @@ from .injector_design import InjectorDesign, design_injector
 from .line_sizing import MATERIALS
 from .manifold_design import ManifoldSystemDesign, design_manifolds
 from .optimize import ChannelDesignResult, optimize_channels
+from .thermostructural import ThermoStructuralResult, analyze as ts_analyze
+from .combustion_stability import StabilityResult, stability_screen
 
 G0 = 9.80665
 
@@ -120,7 +122,8 @@ class EngineSpec:
     thrust_per_element: float = 1.5e3   # N
     expansion_ratio_cap: float = 25.0   # vacuum-design cap
     helix_angle_deg: float = 0.0
-    nozzle_type: str = "bell"           # "bell" (thrust-optimized) | "conical"
+    nozzle_type: str = "bell"           # "bell" | "conical" | "moc" (MOC, λ≈1)
+    required_cycles: int = 4            # min low-cycle-fatigue life
     bell_percent: float = 0.8           # bell length vs 15-deg cone reference
     name: str = "engine"
 
@@ -247,6 +250,8 @@ class EngineDesign:
     manifolds: ManifoldSystemDesign
     t_closeout: float
     P_coolant_inlet: float
+    thermostructural: ThermoStructuralResult | None = None
+    stability: StabilityResult | None = None
     # bookkeeping
     ledger: list[LedgerItem] = field(default_factory=list)
     trace: DesignTrace | None = None
@@ -491,13 +496,16 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         lam_cone = nozzle_divergence_efficiency(eps, "conical")
         eta_cf = eta_friction * lam
         Cf *= eta_cf
+        _nozzle_desc = {
+            "conical": "straight 15-deg cone",
+            "bell": f"Rao {spec.bell_percent*100:.0f}% parabolic bell "
+                    "(approximation)",
+            "moc": "method-of-characteristics, uniform axial exit",
+        }[spec.nozzle_type]
         log("A. performance", "nozzle contour",
-            f"{spec.nozzle_type} nozzle"
-            + (f" ({spec.bell_percent*100:.0f}% bell)"
-               if spec.nozzle_type == "bell" else "")
-            + f": divergence efficiency lambda={lam:.4f} vs {lam_cone:.4f} "
-            f"for a 15-deg cone (+{(lam/lam_cone-1)*100:.1f}% Cf) — "
-            "Rao thrust-optimized-parabola approximation")
+            f"{spec.nozzle_type} nozzle: divergence efficiency "
+            f"lambda={lam:.4f} vs {lam_cone:.4f} for a 15-deg cone "
+            f"(+{(lam/lam_cone-1)*100:.1f}% Cf) — {_nozzle_desc}")
         At = spec.thrust / (Cf * Pc)
         Rt = float(np.sqrt(At / np.pi))
         mdot = Pc * At / cstar
@@ -522,7 +530,7 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         contour = ChamberContour(
             throat_radius=Rt, contraction_ratio=cr, expansion_ratio=eps,
             chamber_length=Lc, nozzle_type=spec.nozzle_type,
-            bell_percent=spec.bell_percent)
+            bell_percent=spec.bell_percent, gamma=gas.gamma)
         mdot_fuel = mdot / (1.0 + of)
         mdot_ox = mdot - mdot_fuel
 
@@ -677,6 +685,40 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
             f"{S/1e6:.0f} MPa (x1.25) -> t = {t_close*1e3:.2f} mm "
             "(1 mm print floor)")
 
+        # ============ F. thermo-structural + fatigue life =================
+        ts = ts_analyze(cd.result, cd.channels, gas, Pc, spec.liner)
+        log("F. structure/life", "thermo-structural",
+            f"peak hot-wall stress {ts.peak_stress/1e6:.0f} MPa (thermal "
+            f"{ts.sigma_thermal.max()/1e6:.0f} + pressure "
+            f"{ts.sigma_pressure.max()/1e6:.0f}), min yield margin "
+            f"{ts.min_margin*100:.0f}%, low-cycle-fatigue life "
+            f"{ts.cycle_life:.0f} cycles (Manson-Coffin, Δε "
+            f"{ts.delta_eps_max*100:.2f}%)")
+        ledger += [
+            LedgerItem("hot-wall yield margin", ts.min_margin > 0.0,
+                       f"{ts.min_margin*100:.0f}%",
+                       "combined thermal+pressure stress < derated yield"),
+            LedgerItem("low-cycle-fatigue life",
+                       ts.cycle_life >= spec.required_cycles,
+                       f"{ts.cycle_life:.0f} cycles",
+                       f">= {spec.required_cycles} required"),
+        ]
+
+        # ============ G. combustion-stability screen ======================
+        stab = stability_screen(gas, contour, inj.stiffness_ox)
+        log("G. stability", "acoustic screen",
+            f"a={stab.sound_speed:.0f} m/s; 1L {stab.modes['1L']/1e3:.1f} / "
+            f"1T {stab.modes['1T']/1e3:.1f} / 2T {stab.modes['2T']/1e3:.1f} "
+            f"kHz; injector stiffness {stab.stiffness*100:.0f}% Pc"
+            + ("" if not stab.sensitive_modes else
+               f"; in n-τ band: {', '.join(stab.sensitive_modes)} "
+               "(screen flag — verify with a combustion-response analysis)"))
+        # hard guard = chug stiffness; acoustic coupling is a flag, not a fail
+        ledger.append(LedgerItem(
+            "injector chug stiffness", stab.stiffness_ok,
+            f"{stab.stiffness*100:.0f}% Pc",
+            f">= {0.15*100:.0f}% Pc (chug guard)"))
+
         # ============ verdict ==============================================
         if all(item.ok for item in ledger):
             log("done", "converged",
@@ -691,7 +733,8 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
                 throat_radius=Rt, contraction_ratio=cr, chamber_length=Lc,
                 L_star=Lstar, contour=contour, channel_design=cd,
                 injector=inj, manifolds=man, t_closeout=t_close,
-                P_coolant_inlet=P_inlet, ledger=ledger, trace=trace,
+                P_coolant_inlet=P_inlet, thermostructural=ts,
+                stability=stab, ledger=ledger, trace=trace,
                 iterations=iteration)
         # soft failures with no dedicated repair rule (e.g. uniformity):
         # nothing left to adjust deterministically -> fail loudly

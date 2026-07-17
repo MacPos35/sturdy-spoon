@@ -191,3 +191,15 @@ def test_aerospike_package(tmp_path, aspike):
         assert key in paths
     md = open(paths["report"]).read()
     assert "annular throat" in md and "spike" in md
+
+
+def test_aerospike_verification_items(aspike):
+    """Both circuits re-marched; the Euler CFD check is (documented as)
+    skipped for external plug flows."""
+    v = [i for i in aspike.ledger if i.name.startswith("verify")]
+    assert len(v) == 3 and all(i.ok for i in v)
+    names = " ".join(i.name for i in v)
+    assert "cowl regen re-march" in names
+    assert "spike regen re-march" in names
+    assert "Euler CFD" not in names
+    assert "skipped" in str(aspike.trace)

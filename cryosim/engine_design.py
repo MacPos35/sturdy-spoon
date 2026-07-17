@@ -139,6 +139,7 @@ class EngineSpec:
     helix_angle_deg: float = 0.0
     nozzle_type: str = "bell"       # "bell" | "conical" | "moc" | "aerospike"
     spike_length_fraction: float = 0.30  # aerospike: retained spike length
+    verify: bool = True             # post-design independent verification
     required_cycles: int = 4            # min low-cycle-fatigue life
     bell_percent: float = 0.8           # bell length vs 15-deg cone reference
     name: str = "engine"
@@ -155,7 +156,7 @@ class EngineSpec:
             # non-string spec fields
             if k not in ("propellants", "liner", "closeout_material",
                          "process", "name", "combustion_gas",
-                         "nozzle_type", "credit_film") \
+                         "nozzle_type", "credit_film", "verify") \
                     and isinstance(v, str):
                 d[k] = float(v)
         if isinstance(d.get("combustion_gas"), dict):
@@ -846,12 +847,7 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
 
         # ============ verdict ==============================================
         if all(item.ok for item in ledger):
-            log("done", "converged",
-                f"all {len(ledger)} ledger constraints satisfied after "
-                f"{iteration} iteration(s)")
-            if verbose:
-                print(f"  ({time.perf_counter()-trace.t0:.1f} s)")
-            return EngineDesign(
+            design = EngineDesign(
                 spec=spec, gas=gas, mdot=mdot, mdot_ox=mdot_ox,
                 mdot_fuel=mdot_fuel, of_ratio=of, expansion_ratio=eps,
                 c_star=cstar, Cf=Cf, Isp_ambient=Isp, Isp_vac=Isp_vac,
@@ -861,6 +857,20 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
                 P_coolant_inlet=P_inlet, thermostructural=ts,
                 stability=stab, ledger=ledger, trace=trace,
                 iterations=iteration)
+            if spec.verify:
+                from .verify_design import verify_design
+                v_items = verify_design(design, log)
+                ledger.extend(v_items)
+                if not all(i.ok for i in v_items):
+                    raise DesignError(
+                        "independent verification failed on the converged "
+                        "design", ledger, trace)
+            log("done", "converged",
+                f"all {len(ledger)} ledger constraints satisfied after "
+                f"{iteration} iteration(s)")
+            if verbose:
+                print(f"  ({time.perf_counter()-trace.t0:.1f} s)")
+            return design
         # soft failures with no dedicated repair rule (e.g. uniformity):
         # nothing left to adjust deterministically -> fail loudly
         failed = [i.name for i in ledger if not i.ok]
@@ -1264,12 +1274,7 @@ def _design_aerospike(spec: EngineSpec, n_random: int, n_polish: int,
 
         # ============ verdict =============================================
         if all(item.ok for item in ledger):
-            log("done", "converged",
-                f"all {len(ledger)} ledger constraints satisfied after "
-                f"{iteration} iteration(s)")
-            if verbose:
-                print(f"  ({time.perf_counter()-trace.t0:.1f} s)")
-            return EngineDesign(
+            design = EngineDesign(
                 spec=spec, gas=gas, mdot=mdot, mdot_ox=mdot_ox,
                 mdot_fuel=mdot_fuel, of_ratio=of, expansion_ratio=eps,
                 c_star=cstar, Cf=Cf, Isp_ambient=Isp, Isp_vac=Isp_vac,
@@ -1282,6 +1287,20 @@ def _design_aerospike(spec: EngineSpec, n_random: int, n_polish: int,
                 spike_channel_design=spike_cd, spike_manifolds=man_spike,
                 spike_thermostructural=ts_spike, P_ox_inlet=P_ox_inlet,
                 ledger=ledger, trace=trace, iterations=iteration)
+            if spec.verify:
+                from .verify_design import verify_design
+                v_items = verify_design(design, log)
+                ledger.extend(v_items)
+                if not all(i.ok for i in v_items):
+                    raise DesignError(
+                        "independent verification failed on the converged "
+                        "design", ledger, trace)
+            log("done", "converged",
+                f"all {len(ledger)} ledger constraints satisfied after "
+                f"{iteration} iteration(s)")
+            if verbose:
+                print(f"  ({time.perf_counter()-trace.t0:.1f} s)")
+            return design
         failed = [i.name for i in ledger if not i.ok]
         raise DesignError(
             f"constraints failed with no applicable repair rule: {failed}",

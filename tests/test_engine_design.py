@@ -189,3 +189,24 @@ def test_kerolox_without_film_credit_fails_loudly():
 
 def test_methalox_has_no_coking_item(demo):
     assert not any("coking" in i.name for i in demo.ledger)
+
+
+# ------------------------------------------------- verification pass
+
+def test_default_design_carries_verification(demo):
+    """spec.verify defaults on: the ledger must carry the independent
+    checks (thrust closure, regen re-march, Euler CFD), all passing."""
+    v = [i for i in demo.ledger if i.name.startswith("verify")]
+    assert len(v) == 3
+    assert all(i.ok for i in v)
+    names = " ".join(i.name for i in v)
+    assert "thrust closure" in names
+    assert "regen re-march" in names
+    assert "Euler CFD" in names
+
+
+def test_verify_can_be_disabled():
+    spec = EngineSpec(thrust=3e3, chamber_pressure=15e5, verify=False,
+                      name="noverify")
+    d = design_engine(spec, **FAST)
+    assert not any(i.name.startswith("verify") for i in d.ledger)

@@ -184,6 +184,7 @@ class InjectorDesign:
     P_feed_fuel: float
     mdot_ox: float
     mdot_fuel: float
+    face_r_inner: float = 0.0           # >0: annular face (aerospike)
     notes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -221,12 +222,15 @@ class InjectorDesign:
 # ----------------------------------------------------------------------
 
 def _pack_face(n_elements: int, d_env: float, face_radius: float,
-               wall_margin: float, pitch_factor: float
+               wall_margin: float, pitch_factor: float,
+               face_r_inner: float = 0.0
                ) -> tuple[list[tuple[float, int]], float] | None:
     """Place elements on concentric rings; None if they don't fit.
 
     Ring radii step by one pitch; each ring holds floor(2 pi r / pitch)
     elements; a center element is used when the count calls for it.
+    ``face_r_inner > 0`` packs an ANNULAR face (aerospike/toroidal
+    chamber): no center element, rings start clear of the inner wall.
     """
     pitch = pitch_factor * d_env
     r_max = face_radius - wall_margin - d_env / 2.0
@@ -234,10 +238,15 @@ def _pack_face(n_elements: int, d_env: float, face_radius: float,
         return None
     rings: list[tuple[float, int]] = []
     remaining = n_elements
-    if remaining % 2 == 1 or remaining == 1:   # center element for odd counts
-        rings.append((0.0, 1))
-        remaining -= 1
-    r = pitch
+    if face_r_inner > 0.0:
+        r = face_r_inner + wall_margin + d_env / 2.0
+        if r > r_max + 1e-12:
+            return None
+    else:
+        if remaining % 2 == 1 or remaining == 1:   # center element (odd)
+            rings.append((0.0, 1))
+            remaining -= 1
+        r = pitch
     while remaining > 0 and r <= r_max + 1e-12:
         cap = int(np.floor(2.0 * np.pi * r / pitch))
         take = min(cap, remaining)
@@ -262,6 +271,7 @@ def design_injector(
     mu_ox: float,
     rho_fuel: float,
     face_radius: float,
+    face_r_inner: float = 0.0,
     stiffness: float = 0.20,
     spray_half_angle_deg: float = 45.0,
     thrust_per_element: float = 1.5e3,
@@ -282,7 +292,9 @@ def design_injector(
     Parameters (SI unless noted): chamber pressure, sea-level thrust (element
     count heuristic only), circuit flows, injection-state densities (fuel =
     regen-jacket outlet state), ox viscosity (port Re), chamber radius at the
-    injector face. ``stiffness`` sets dP = stiffness * Pc for both circuits.
+    injector face. ``face_r_inner`` > 0 packs an annular face between the
+    inner and outer chamber walls (aerospike/toroidal chambers).
+    ``stiffness`` sets dP = stiffness * Pc for both circuits.
     ``film_fraction`` of the fuel goes to the wall film ring (0 disables).
     ``dp_manifold_frac`` adds a manifold/dome loss allowance on top of the
     element drop when reporting required feed pressures.
@@ -343,7 +355,7 @@ def design_injector(
     while n_elem >= 1:
         elem, ann, d_env = build_element(n_elem)
         packing = _pack_face(n_elem, d_env, face_radius, wall_margin,
-                             pitch_factor)
+                             pitch_factor, face_r_inner)
         if packing is not None:
             break
         n_elem -= 1
@@ -407,7 +419,7 @@ def design_injector(
     return InjectorDesign(
         n_elements=n_elem, element=elem, annulus=ann, film=film,
         rings=rings, pitch=pitch, d_element_env=d_env,
-        face_radius=face_radius, Pc=Pc,
+        face_radius=face_radius, face_r_inner=face_r_inner, Pc=Pc,
         stiffness_ox=dP / Pc, stiffness_fuel=dP / Pc,
         P_feed_ox=P_feed, P_feed_fuel=P_feed,
         mdot_ox=mdot_ox, mdot_fuel=mdot_fuel,

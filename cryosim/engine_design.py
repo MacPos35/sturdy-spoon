@@ -137,7 +137,8 @@ class EngineSpec:
     thrust_per_element: float = 1.5e3   # N
     expansion_ratio_cap: float = 25.0   # vacuum-design cap
     helix_angle_deg: float = 0.0
-    nozzle_type: str = "bell"           # "bell" | "conical" | "moc" (MOC, λ≈1)
+    nozzle_type: str = "bell"       # "bell" | "conical" | "moc" | "aerospike"
+    spike_length_fraction: float = 0.30  # aerospike: retained spike length
     required_cycles: int = 4            # min low-cycle-fatigue life
     bell_percent: float = 0.8           # bell length vs 15-deg cone reference
     name: str = "engine"
@@ -267,6 +268,14 @@ class EngineDesign:
     P_coolant_inlet: float
     thermostructural: ThermoStructuralResult | None = None
     stability: StabilityResult | None = None
+    # aerospike-only subsystems (None for bell/conical/moc engines):
+    # ``contour`` is then the cowl surface, ``channel_design`` the fuel-
+    # cooled cowl circuit, and the spike carries its own LOX circuit.
+    aerospike: object | None = None            # AerospikeChamber
+    spike_channel_design: ChannelDesignResult | None = None
+    spike_manifolds: ManifoldSystemDesign | None = None
+    spike_thermostructural: ThermoStructuralResult | None = None
+    P_ox_inlet: float | None = None
     # bookkeeping
     ledger: list[LedgerItem] = field(default_factory=list)
     trace: DesignTrace | None = None
@@ -315,7 +324,33 @@ class EngineDesign:
              f"(target {self.manifolds.target*100:.0f}%)"),
             ("closeout shell", f"{self.t_closeout*1e3:.2f} mm "
              f"{self.spec.closeout_material}"),
+        ] + self._aerospike_rows()
+
+    def _aerospike_rows(self) -> list[tuple[str, str]]:
+        if self.aerospike is None:
+            return []
+        a, scd = self.aerospike, self.spike_channel_design
+        rows = [
+            ("annular throat", f"mean R {a.R_mean*1e3:.1f} mm, gap "
+             f"{a.gap_throat*1e3:.2f} mm (cowl lip R "
+             f"{a.spike.R_lip*1e3:.1f} mm)"),
+            ("spike", f"{a.spike.length*1e3:.0f} mm "
+             f"({a.spike.length_fraction*100:.0f}% of ideal "
+             f"{a.spike.length_full*1e3:.0f} mm), base R "
+             f"{a.spike.r_base*1e3:.1f} mm"),
         ]
+        if scd is not None:
+            rows += [
+                ("spike cooling (LOX)",
+                 f"{scd.channels.n_channels} x "
+                 f"{scd.channels.channel_width*1e3:.2f} x "
+                 f"{scd.channels.channel_height*1e3:.2f} mm, peak T_wg "
+                 f"{scd.peak_T_wg:.0f} K, dP {scd.dp/1e5:.1f} bar"),
+            ]
+        if self.P_ox_inlet is not None:
+            rows.append(("LOX feed pressure",
+                         f"{self.P_ox_inlet/1e5:.0f} bar"))
+        return rows
 
     def describe(self) -> str:
         lines = [f"Engine design '{self.spec.name}' "
@@ -387,17 +422,9 @@ def _l_star_rule(propellants: str) -> tuple[float, str]:
 # The pipeline
 # ----------------------------------------------------------------------
 
-def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
-                  verbose: bool = False) -> EngineDesign:
-    """Run the full autonomous design; raises DesignError on failure."""
-    trace = DesignTrace()
-
-    def log(stage, rule, detail):
-        trace.log(stage, rule, detail)
-        if verbose:
-            print(f"  {TraceEntry(stage, rule, detail)}")
-
-    # ---------------- propellants & gas ----------------------------------
+def _setup_design(spec: EngineSpec, log):
+    """Stage-0 setup shared by the bell/conical/moc and aerospike paths:
+    propellant parse, mixture ratio, combustion gas, materials/process."""
     if "/" not in spec.propellants:
         raise ValueError("propellants must be 'ox/fuel', e.g. 'lox/ch4'")
     ox_name, fuel_name = spec.propellants.split("/", 1)
@@ -454,27 +481,51 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
         f"T_limit={liner['T_limit']:.0f} K), closeout "
         f"{spec.closeout_material}, process {spec.process} "
         f"({proc['note']})")
+    return ox_name, fuel_name, of, gas, have_eq, liner, proc
+
+
+def _coolant_inlet_rule(spec: EngineSpec, coolant: Fluid, log) -> float:
+    """Coolant inlet temperature: spec override, else the cryogen
+    near-saturation rule or ambient for storables."""
+    if spec.coolant_inlet_T is not None:
+        return spec.coolant_inlet_T
+    T_sat2 = coolant.T_sat(2e5)
+    if T_sat2 > 320.0:
+        # storable fuel (kerosene/ethanol class): loaded at ambient,
+        # not near saturation like a cryogen
+        T_in = 288.15
+        log("0. setup", "coolant inlet temperature",
+            f"{T_in:.0f} K: ambient (storable fuel; the "
+            "near-saturation rule only applies to cryogens)")
+    else:
+        T_in = T_sat2 - 3.0
+        log("0. setup", "coolant inlet temperature",
+            f"{T_in:.0f} K: 3 K subcooled below saturation at 2 bar "
+            "(typical run-tank condition)")
+    return T_in
+
+
+def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
+                  verbose: bool = False) -> EngineDesign:
+    """Run the full autonomous design; raises DesignError on failure."""
+    if spec.nozzle_type == "aerospike":
+        return _design_aerospike(spec, n_random, n_polish, verbose)
+    trace = DesignTrace()
+
+    def log(stage, rule, detail):
+        trace.log(stage, rule, detail)
+        if verbose:
+            print(f"  {TraceEntry(stage, rule, detail)}")
+
+    ox_name, fuel_name, of, gas, have_eq, liner, proc = \
+        _setup_design(spec, log)
 
     # ---------------- mutable design state (repair rules act here) -------
     dp_budget = spec.dp_budget
     thrust_per_element = spec.thrust_per_element
     coolant = Fluid(fuel_name)
     oxidizer = Fluid(ox_name)
-    T_cool_in = spec.coolant_inlet_T
-    if T_cool_in is None:
-        T_sat2 = coolant.T_sat(2e5)
-        if T_sat2 > 320.0:
-            # storable fuel (kerosene/ethanol class): loaded at ambient,
-            # not near saturation like a cryogen
-            T_cool_in = 288.15
-            log("0. setup", "coolant inlet temperature",
-                f"{T_cool_in:.0f} K: ambient (storable fuel; the "
-                "near-saturation rule only applies to cryogens)")
-        else:
-            T_cool_in = T_sat2 - 3.0
-            log("0. setup", "coolant inlet temperature",
-                f"{T_cool_in:.0f} K: 3 K subcooled below saturation at 2 bar "
-                "(typical run-tank condition)")
+    T_cool_in = _coolant_inlet_rule(spec, coolant, log)
     # feed pressure rule: chamber + injector drop (+ manifold allowance)
     # + jacket budget + 10% line margin
     def feed_pressure(dp_b):
@@ -812,6 +863,417 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
                 iterations=iteration)
         # soft failures with no dedicated repair rule (e.g. uniformity):
         # nothing left to adjust deterministically -> fail loudly
+        failed = [i.name for i in ledger if not i.ok]
+        raise DesignError(
+            f"constraints failed with no applicable repair rule: {failed}",
+            ledger, trace)
+
+    raise DesignError(
+        f"rule budget exhausted after {max_iter} iterations "
+        f"(last violation: {last_error})", [], trace)
+
+
+# ----------------------------------------------------------------------
+# Aerospike pipeline
+# ----------------------------------------------------------------------
+
+def _design_aerospike(spec: EngineSpec, n_random: int, n_polish: int,
+                      verbose: bool) -> EngineDesign:
+    """Aerospike variant of the pipeline: annular chamber + truncated
+    spike, fuel-cooled cowl, LOX-cooled spike (the LEAP 71 arrangement).
+
+    Same stage structure, ledger and repair rules as the bell path; the
+    thermal stage runs TWO cooling circuits and both injection states come
+    from their regen outlets.
+    """
+    from .aerospike import (annular_stability_screen,
+                            design_aerospike_chamber, truncation_cf_loss)
+
+    trace = DesignTrace()
+
+    def log(stage, rule, detail):
+        trace.log(stage, rule, detail)
+        if verbose:
+            print(f"  {TraceEntry(stage, rule, detail)}")
+
+    ox_name, fuel_name, of, gas, have_eq, liner, proc = \
+        _setup_design(spec, log)
+
+    dp_budget = spec.dp_budget
+    thrust_per_element = spec.thrust_per_element
+    coolant = Fluid(fuel_name)
+    oxidizer = Fluid(ox_name)
+    T_cool_in = _coolant_inlet_rule(spec, coolant, log)
+    T_ox_in = min(95.0, oxidizer.T_sat(2e5) - 3.0)
+    log("0. setup", "spike coolant",
+        f"spike circuit cooled by the oxidizer ({oxidizer.name}) at "
+        f"{T_ox_in:.0f} K inlet - the arrangement LEAP 71 used on its "
+        "aerospike; fuel cools the cowl/chamber outer wall")
+
+    def feed_pressure(dp_b):
+        return (spec.chamber_pressure * (1.0 + spec.stiffness * 1.15)
+                + dp_b) * 1.10
+
+    P_inlet = feed_pressure(dp_budget)
+    P_ox_inlet = feed_pressure(dp_budget)
+    supercritical_forced = False
+    ox_supercritical_forced = False
+
+    last_error = ""
+    max_iter = 6
+    for iteration in range(1, max_iter + 1):
+        ledger: list[LedgerItem] = []
+
+        # ============ A. performance sizing ===============================
+        Pc, Pa = spec.chamber_pressure, spec.ambient_pressure
+        eps, why = _optimum_expansion(gas, Pc, Pa, spec.expansion_ratio_cap)
+        log("A. performance", "expansion ratio", why)
+        eta_cstar, eta_friction = 0.95, 0.987
+        if have_eq:
+            cstar_ideal = shifting_c_star(fuel_name, of, Pc)
+            cstar_kind = "shifting-equilibrium"
+        else:
+            cstar_ideal = _c_star(gas)
+            cstar_kind = "frozen"
+        cstar = cstar_ideal * eta_cstar
+        Cf_id, Pe = _thrust_coefficient(gas, Pc, eps, Pa)
+        # the free outer plume boundary altitude-compensates: no
+        # Summerfield separation guard applies to a spike
+        lam = 1.0
+        dCf = truncation_cf_loss(gas.gamma, eps, Pa / Pc,
+                                 spec.spike_length_fraction)
+        Cf = Cf_id * eta_friction * lam - dCf
+        log("A. performance", "nozzle contour",
+            f"aerospike: axial exit (divergence lambda=1.000), truncated "
+            f"at {spec.spike_length_fraction*100:.0f}% of the ideal spike "
+            f"-> truncation loss dCf={dCf:.4f} "
+            f"({dCf/(Cf_id*eta_friction)*100:.1f}% of Cf; closed-wake "
+            "base pressure P_b=Pa, Angelino contour / Hagemann 1998)")
+        At = spec.thrust / (Cf * Pc)
+        Rt_eq = float(np.sqrt(At / np.pi))
+        mdot = Pc * At / cstar
+        Isp = spec.thrust / (mdot * G0)
+        Cf_vac_id, _ = _thrust_coefficient(gas, Pc, eps, 0.0)
+        dCf_vac = truncation_cf_loss(gas.gamma, eps, 0.0,
+                                     spec.spike_length_fraction)
+        Isp_vac = (Cf_vac_id * eta_friction - dCf_vac) * cstar / G0
+        log("A. performance", "throat sizing",
+            f"{cstar_kind} c*={cstar_ideal:.0f} m/s x eta_c*={eta_cstar}; "
+            f"Cf={Cf:.3f} (incl. truncation) -> annular At={At*1e4:.2f} "
+            f"cm^2 (equiv. Dt {2e3*Rt_eq:.1f} mm), mdot={mdot:.3f} kg/s, "
+            f"Isp={Isp:.0f} s")
+        cr, why = _contraction_ratio_rule(Rt_eq)
+        log("A. performance", "contraction ratio",
+            why + " (keyed on the equivalent throat diameter)")
+        Lstar, why = _l_star_rule(spec.propellants)
+        log("A. performance", "L*", why)
+
+        chamber = None
+        for _try in range(4):
+            try:
+                chamber = design_aerospike_chamber(
+                    At, eps, cr, Lstar, gas.gamma,
+                    spec.spike_length_fraction)
+                break
+            except ValueError:
+                cr *= 0.8
+        if chamber is None:
+            raise DesignError(
+                "annular chamber cannot close geometrically even at a "
+                "reduced contraction ratio", ledger, trace)
+        sp = chamber.spike
+        log("A. performance", "annular chamber",
+            f"throat annulus: mean R {chamber.R_mean*1e3:.1f} mm, gap "
+            f"{chamber.gap_throat*1e3:.2f} mm (cowl lip R "
+            f"{sp.R_lip*1e3:.1f} mm); chamber gap "
+            f"{chamber.gap_chamber*1e3:.1f} mm, L_c "
+            f"{chamber.L_chamber*1e3:.0f} mm; spike {sp.length*1e3:.0f} mm "
+            f"({sp.length_fraction*100:.0f}% of ideal "
+            f"{sp.length_full*1e3:.0f} mm), base R {sp.r_base*1e3:.1f} mm")
+        mdot_fuel = mdot / (1.0 + of)
+        mdot_ox = mdot - mdot_fuel
+
+        # ============ B. thermal design (two circuits) ====================
+        for which, P_need in (("fuel", P_inlet), ("LOX", P_ox_inlet)):
+            if P_need > spec.max_feed_pressure:
+                raise DesignError(
+                    f"required {which} feed pressure {P_need/1e5:.0f} bar "
+                    f"exceeds the capability ceiling "
+                    f"{spec.max_feed_pressure/1e5:.0f} bar", ledger, trace)
+        log("B. thermal", "feed pressures",
+            f"fuel {P_inlet/1e5:.0f} bar (cowl circuit), LOX "
+            f"{P_ox_inlet/1e5:.0f} bar (spike circuit); jacket budget "
+            f"{dp_budget/1e5:.0f} bar each")
+        bounds = {
+            "channel_width": (proc["min_channel_width"], 3.0e-3),
+            "t_wall": (proc["min_wall"], 1.5e-3),
+        }
+        film = None
+        if spec.credit_film and spec.film_fraction > 0:
+            T_film = 600.0
+            try:
+                cp_film = coolant.state_TP(T_film, Pc).cp
+            except ValueError:
+                cp_film = 2500.0
+            film = FilmCooling(mdot=spec.film_fraction * mdot_fuel,
+                               T_inject=T_film, cp=cp_film)
+            log("B. thermal", "film-cooling credit",
+                f"{film.mdot*1e3:.0f} g/s ({spec.film_fraction*100:.0f}% "
+                f"of fuel) on the cowl wall at {T_film:.0f} K, "
+                "Hatch-Papell effectiveness (spike gets no film credit)")
+        if spec.bartz_factor != 1.0:
+            log("B. thermal", "Bartz calibration",
+                f"h_g x {spec.bartz_factor:.2f} (Bartz over-predicts "
+                "LOX/CH4-class heat flux ~20-30%: ODREC, Appl. Sci. "
+                "14(1):71, 2024)")
+
+        cowl_cd = optimize_channels(
+            chamber.cowl, gas, coolant, Pc, mdot_fuel, T_cool_in, P_inlet,
+            dp_budget=dp_budget, k_wall=liner["k_wall"], bounds=bounds,
+            n_random=n_random, n_polish=n_polish,
+            min_land=proc["min_land"],
+            film=film, bartz_factor=spec.bartz_factor)
+        spike_cd = optimize_channels(
+            chamber.inner, gas, oxidizer, Pc, mdot_ox, T_ox_in, P_ox_inlet,
+            dp_budget=dp_budget, k_wall=liner["k_wall"], bounds=bounds,
+            n_random=n_random, n_polish=n_polish,
+            min_land=proc["min_land"],
+            bartz_factor=spec.bartz_factor)
+        for tag, cd in (("cowl", cowl_cd), ("spike", spike_cd)):
+            log("B. thermal", f"{tag} channel search",
+                f"{cd.n_evaluations} regen solves -> "
+                f"{cd.channels.n_channels} channels "
+                f"{cd.channels.channel_width*1e3:.2f}x"
+                f"{cd.channels.channel_height*1e3:.2f} mm, wall "
+                f"{cd.channels.t_wall*1e3:.2f} mm: peak T_wg "
+                f"{cd.peak_T_wg:.0f} K, dP {cd.dp/1e5:.1f} bar")
+            ledger += [
+                LedgerItem(f"{tag}: peak hot-wall temperature",
+                           cd.peak_T_wg <= liner["T_limit"],
+                           f"{cd.peak_T_wg:.0f} K",
+                           f"<= {liner['T_limit']:.0f} K ({spec.liner})"),
+                LedgerItem(f"{tag}: jacket pressure drop",
+                           cd.dp <= dp_budget * 1.05,
+                           f"{cd.dp/1e5:.1f} bar",
+                           f"<= {dp_budget/1e5:.0f} bar budget"),
+                LedgerItem(f"{tag}: single-phase coolant",
+                           not cd.result.boiling_detected,
+                           "two-phase!" if cd.result.boiling_detected
+                           else "single-phase/supercritical",
+                           "no boiling in the jacket"),
+                LedgerItem(f"{tag}: land at min radius",
+                           cd.land_at_throat >= proc["min_land"],
+                           f"{cd.land_at_throat*1e3:.2f} mm",
+                           f">= {proc['min_land']*1e3:.1f} mm "
+                           f"({spec.process})"),
+            ]
+        T_coke = COKING_LIMIT.get(fuel_name.strip().lower())
+        T_wc_max = float(cowl_cd.result.T_wc.max())
+        if T_coke is not None:
+            ledger.append(LedgerItem(
+                "cowl: coolant-side wall (coking)", T_wc_max <= T_coke,
+                f"{T_wc_max:.0f} K",
+                f"<= {T_coke:.0f} K (RP-1 coking limit, SP-8087)"))
+
+        # ---- repair rules for stage B ------------------------------------
+        if cowl_cd.result.boiling_detected and not supercritical_forced:
+            P_inlet = 1.2 * coolant.P_crit + dp_budget
+            log("B. thermal", "REPAIR: supercritical fuel feed",
+                f"cowl coolant entered the vapor dome; raising fuel feed "
+                f"to {P_inlet/1e5:.0f} bar (1.2 x P_crit + budget)")
+            supercritical_forced = True
+            last_error = "two-phase cowl coolant"
+            continue
+        if spike_cd.result.boiling_detected and not ox_supercritical_forced:
+            P_ox_inlet = 1.2 * oxidizer.P_crit + dp_budget
+            log("B. thermal", "REPAIR: supercritical LOX feed",
+                f"spike coolant entered the vapor dome; raising LOX feed "
+                f"to {P_ox_inlet/1e5:.0f} bar (1.2 x P_crit + budget)")
+            ox_supercritical_forced = True
+            last_error = "two-phase spike coolant"
+            continue
+        too_hot = max(cowl_cd.peak_T_wg, spike_cd.peak_T_wg) \
+            > liner["T_limit"]
+        coking = T_coke is not None and T_wc_max > T_coke
+        if too_hot or coking:
+            if dp_budget < 2.0 * spec.dp_budget:
+                dp_budget *= 1.5
+                P_inlet = max(P_inlet, feed_pressure(dp_budget))
+                P_ox_inlet = max(P_ox_inlet, feed_pressure(dp_budget))
+                log("B. thermal", "REPAIR: raise dp budget",
+                    f"{'wall temperature' if too_hot else 'coking'} limit "
+                    f"exceeded; raising the jacket budget to "
+                    f"{dp_budget/1e5:.0f} bar for more coolant velocity")
+                last_error = "wall temperature" if too_hot else "coking"
+                continue
+            raise DesignError(
+                "cannot cool the aerospike walls even at a doubled dp "
+                f"budget (cowl {cowl_cd.peak_T_wg:.0f} K, spike "
+                f"{spike_cd.peak_T_wg:.0f} K, cowl coolant-side "
+                f"{T_wc_max:.0f} K) - consider a higher-k liner, lower "
+                "Pc, film cooling, or a longer spike", ledger, trace)
+
+        # ============ C. injector (annular face) ==========================
+        f_out = cowl_cd.result.coolant_outlet
+        ox_out = spike_cd.result.coolant_outlet
+        log("C. injector", "injection states",
+            f"ox from spike regen outlet: {ox_out.T:.0f} K, "
+            f"{ox_out.rho:.0f} kg/m^3 at {ox_out.P/1e5:.0f} bar; fuel "
+            f"from cowl regen outlet: {f_out.T:.0f} K, "
+            f"{f_out.rho:.0f} kg/m^3 at {f_out.P/1e5:.0f} bar")
+        r_face_out = float(chamber.cowl.r[0])
+        r_face_in = float(chamber.inner.r[0])
+        inj = design_injector(
+            Pc=Pc, thrust=spec.thrust, mdot_ox=mdot_ox, mdot_fuel=mdot_fuel,
+            rho_ox=ox_out.rho, mu_ox=ox_out.mu, rho_fuel=f_out.rho,
+            face_radius=r_face_out, face_r_inner=r_face_in,
+            stiffness=spec.stiffness,
+            spray_half_angle_deg=spec.spray_half_angle_deg,
+            thrust_per_element=thrust_per_element,
+            film_fraction=spec.film_fraction,
+            min_orifice_d=proc["min_orifice"])
+        for n_ in inj.notes:
+            log("C. injector", "sizing", n_)
+        for w in inj.warnings:
+            log("C. injector", "warning", w)
+        port_ok = 2.0 * inj.element.r_tangential >= proc["min_orifice"]
+        ledger.append(LedgerItem(
+            "injector tangential ports", port_ok,
+            f"d {2e3*inj.element.r_tangential:.2f} mm",
+            f">= {proc['min_orifice']*1e3:.1f} mm ({spec.process})"))
+        supply_ok = f_out.P >= Pc * (1.0 + spec.stiffness)
+        ox_supply_ok = ox_out.P >= Pc * (1.0 + spec.stiffness)
+        ledger += [
+            LedgerItem("injector fuel supply", supply_ok,
+                       f"cowl outlet {f_out.P/1e5:.1f} bar",
+                       f">= Pc + drop = {Pc*(1+spec.stiffness)/1e5:.1f} "
+                       "bar"),
+            LedgerItem("injector LOX supply", ox_supply_ok,
+                       f"spike outlet {ox_out.P/1e5:.1f} bar",
+                       f">= Pc + drop = {Pc*(1+spec.stiffness)/1e5:.1f} "
+                       "bar"),
+        ]
+        if not port_ok:
+            thrust_per_element *= 1.5
+            log("C. injector", "REPAIR: fewer, larger elements",
+                f"tangential ports below the {spec.process} floor; raising "
+                f"thrust/element to {thrust_per_element/1e3:.1f} kN")
+            last_error = "injector port size"
+            continue
+        if not supply_ok:
+            P_inlet = (Pc * (1.0 + spec.stiffness * 1.15)
+                       + cowl_cd.dp) * 1.10
+            log("C. injector", "REPAIR: raise fuel feed",
+                f"cowl outlet cannot supply the injector; fuel feed raised "
+                f"to {P_inlet/1e5:.0f} bar")
+            last_error = "injector fuel supply"
+            continue
+        if not ox_supply_ok:
+            P_ox_inlet = (Pc * (1.0 + spec.stiffness * 1.15)
+                          + spike_cd.dp) * 1.10
+            log("C. injector", "REPAIR: raise LOX feed",
+                f"spike outlet cannot supply the injector; LOX feed raised "
+                f"to {P_ox_inlet/1e5:.0f} bar")
+            last_error = "injector LOX supply"
+            continue
+
+        # ============ D. manifolds (both circuits) ========================
+        inlet_state = coolant.state_TP(T_cool_in, P_inlet)
+        man = design_manifolds(
+            chamber.cowl, cowl_cd.channels, mdot_fuel, cowl_cd.dp,
+            rho_in=inlet_state.rho, mu_in=inlet_state.mu,
+            rho_out=f_out.rho, mu_out=f_out.mu,
+            mawp=P_inlet, coolant_name=coolant.name,
+            material=spec.closeout_material)
+        ox_in_state = oxidizer.state_TP(T_ox_in, P_ox_inlet)
+        man_spike = design_manifolds(
+            chamber.inner, spike_cd.channels, mdot_ox, spike_cd.dp,
+            rho_in=ox_in_state.rho, mu_in=ox_in_state.mu,
+            rho_out=ox_out.rho, mu_out=ox_out.mu,
+            mawp=P_ox_inlet, coolant_name=oxidizer.name,
+            material=spec.closeout_material)
+        for tag, m in (("cowl", man), ("spike", man_spike)):
+            log("D. manifolds", f"{tag} torus headers",
+                f"inlet duct {m.inlet.duct_diameter*1e3:.1f} mm "
+                f"({m.inlet.n_feeders} feeders), outlet "
+                f"{m.outlet.duct_diameter*1e3:.1f} mm "
+                f"({m.outlet.n_feeders}) -> maldistribution "
+                f"{m.maldistribution*100:.1f}%")
+            ledger.append(LedgerItem(
+                f"{tag}: channel-flow uniformity",
+                m.maldistribution <= m.target,
+                f"{m.maldistribution*100:.1f}%",
+                f"<= {m.target*100:.0f}% (design target)"))
+
+        # ============ E. structure ========================================
+        S = MATERIALS[spec.closeout_material]["S_allow"]
+        r_close = float(chamber.cowl.r.max()) + cowl_cd.channels.t_wall \
+            + cowl_cd.channels.channel_height
+        t_close = max(1.25 * P_inlet * r_close / S, 1.0e-3)
+        log("E. structure", "closeout shell",
+            f"hoop stress at MAWP {P_inlet/1e5:.0f} bar on r "
+            f"{r_close*1e3:.0f} mm vs {spec.closeout_material} allowable "
+            f"{S/1e6:.0f} MPa (x1.25) -> t = {t_close*1e3:.2f} mm "
+            "(1 mm print floor)")
+
+        # ============ F. thermo-structural + fatigue life =================
+        ts = ts_analyze(cowl_cd.result, cowl_cd.channels, gas, Pc,
+                        spec.liner)
+        ts_spike = ts_analyze(spike_cd.result, spike_cd.channels, gas, Pc,
+                              spec.liner)
+        for tag, t in (("cowl", ts), ("spike", ts_spike)):
+            log("F. structure/life", f"{tag} thermo-structural",
+                f"peak stress {t.peak_stress/1e6:.0f} MPa, min yield "
+                f"margin {t.min_margin*100:.0f}%, LCF life "
+                f"{t.cycle_life:.0f} cycles")
+            ledger += [
+                LedgerItem(f"{tag}: hot-wall yield margin",
+                           t.min_margin > 0.0,
+                           f"{t.min_margin*100:.0f}%",
+                           "combined stress < derated yield"),
+                LedgerItem(f"{tag}: low-cycle-fatigue life",
+                           t.cycle_life >= spec.required_cycles,
+                           f"{t.cycle_life:.0f} cycles",
+                           f">= {spec.required_cycles} required"),
+            ]
+
+        # ============ G. combustion-stability screen ======================
+        L_gas = chamber.L_chamber + chamber.L_convergent
+        stab = annular_stability_screen(gas, chamber.R_mean, L_gas,
+                                        inj.stiffness_ox)
+        modes_txt = ", ".join(f"{k} {v/1e3:.1f}kHz"
+                              for k, v in stab.modes.items())
+        log("G. stability", "annular acoustic screen",
+            f"a={stab.sound_speed:.0f} m/s; {modes_txt}; injector "
+            f"stiffness {stab.stiffness*100:.0f}% Pc"
+            + ("" if not stab.sensitive_modes else
+               f"; in n-tau band: {', '.join(stab.sensitive_modes)} "
+               "(screen flag)"))
+        ledger.append(LedgerItem(
+            "injector chug stiffness", stab.stiffness_ok,
+            f"{stab.stiffness*100:.0f}% Pc",
+            f">= {0.15*100:.0f}% Pc (chug guard)"))
+
+        # ============ verdict =============================================
+        if all(item.ok for item in ledger):
+            log("done", "converged",
+                f"all {len(ledger)} ledger constraints satisfied after "
+                f"{iteration} iteration(s)")
+            if verbose:
+                print(f"  ({time.perf_counter()-trace.t0:.1f} s)")
+            return EngineDesign(
+                spec=spec, gas=gas, mdot=mdot, mdot_ox=mdot_ox,
+                mdot_fuel=mdot_fuel, of_ratio=of, expansion_ratio=eps,
+                c_star=cstar, Cf=Cf, Isp_ambient=Isp, Isp_vac=Isp_vac,
+                throat_radius=Rt_eq, contraction_ratio=cr,
+                chamber_length=chamber.L_chamber, L_star=Lstar,
+                contour=chamber.cowl, channel_design=cowl_cd,
+                injector=inj, manifolds=man, t_closeout=t_close,
+                P_coolant_inlet=P_inlet, thermostructural=ts,
+                stability=stab, aerospike=chamber,
+                spike_channel_design=spike_cd, spike_manifolds=man_spike,
+                spike_thermostructural=ts_spike, P_ox_inlet=P_ox_inlet,
+                ledger=ledger, trace=trace, iterations=iteration)
         failed = [i.name for i in ledger if not i.ok]
         raise DesignError(
             f"constraints failed with no applicable repair rule: {failed}",

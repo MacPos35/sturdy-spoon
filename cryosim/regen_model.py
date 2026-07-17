@@ -265,7 +265,9 @@ class RegenCoolingModel:
             boiling = boiling or st.two_phase
             v = G / st.rho
             Re = G * ch.D_h / st.mu
-            Pr = st.Pr
+            # near the critical point the EOS can return non-physical cp
+            # (hence Pr) excursions; clamp so Pr^0.4 stays real and bounded
+            Pr = float(np.clip(st.Pr, 0.2, 100.0))
             Nu = dittus_boelter_nu(Re, Pr)
             h_c0 = Nu * st.k / ch.D_h
             # helical curvature enhancement (Niino/ Ito-type, mild):

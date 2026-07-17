@@ -58,8 +58,9 @@ def nozzle_divergence_efficiency(expansion_ratio: float, nozzle_type: str,
     scale). Same ``0.5(1 + cos theta_exit)`` model as
     :meth:`ChamberContour.divergence_efficiency`.
     """
-    if nozzle_type == "moc":
-        theta_e = 0.0                       # uniform axial exit → λ = 1
+    if nozzle_type in ("moc", "aerospike"):
+        theta_e = 0.0       # uniform axial exit → λ = 1 (the aerospike's
+        # truncation loss is carried separately in Cf, not in λ)
     elif nozzle_type == "bell":
         _, theta_e = _bell_angles(expansion_ratio, bell_percent)
     else:

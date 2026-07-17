@@ -1,0 +1,83 @@
+designing 'tkl5-class-5kN-kerolox': 5.0 kN lox/rp1 at Pc 20 bar (deterministic encoded-rule pipeline — full trace below)
+  [0. setup] mixture ratio: O/F = 2.30 (specified)
+  [0. setup] combustion gas: equilibrium thermochemistry (rp1+LOX, O/F 2.30, Pc 20 bar): T_c=3471 K, frozen gamma=1.226, M=21.8 g/mol, c*=1759 m/s; products CO 37%, H2O 29%, H2 12%, CO2 11% (~2-3% vs CEA)
+  [0. setup] materials/process: liner cucrzr (k=330 W/mK, T_limit=800 K), closeout 316L, process lpbf (laser powder-bed fusion)
+  [0. setup] coolant inlet temperature: 288 K: ambient (storable fuel; the near-saturation rule only applies to cryogens)
+  [A. performance] expansion ratio: perfect expansion at Pa = 101.3 kPa -> area ratio 3.48
+  [A. performance] nozzle contour: bell nozzle: divergence efficiency lambda=0.9912 vs 0.9830 for a 15-deg cone (+0.8% Cf) — Rao 80% parabolic bell (approximation)
+  [A. performance] throat sizing: shifting-equilibrium c*=1807 m/s x eta_c*=0.95; eta_Cf=0.978 (friction 0.987 x divergence 0.991) -> c*=1716 m/s, Cf=1.370, At=18.25 cm^2 (Dt 48.2 mm), mdot=2.127 kg/s, Isp=240 s
+  [A. performance] contraction ratio: throat D 48.2 mm -> contraction ratio 12.0 (small-engine sizing trend, clipped to [4, 15])
+  [A. performance] L*: characteristic length L* = 1.1 m (lox/rp1 class value, Huzel & Huang table 4-1 range)
+  [A. performance] chamber length: L_c = 0.8 L*/CR = 73 mm (cylindrical section; convergent cone supplies the remaining chamber volume)
+  [B. thermal] feed pressure: coolant feed 60 bar = (Pc + injector drop + manifold allowance + jacket budget 30 bar) x 1.10 line margin
+  [B. thermal] film-cooling credit: 97 g/s (15% of fuel) credited as a gaseous film at 600 K (cp 3454 J/kgK), Hatch-Papell effectiveness decay (NASA TN D-130) — no liquid-film or latent-heat credit (conservative)
+  [B. thermal] film effectiveness: eta = 0.79 at the throat, 0.72 at the exit
+  [B. thermal] channel search: 47 regen solves -> 171 channels 0.50x2.04 mm, wall 0.40 mm: peak T_wg 462 K, dP 1.3 bar
+  [C. injector] injection states: ox: 94 K, 1135 kg/m^3; fuel from regen outlet: 353 K, 711 kg/m^3 at 59 bar
+  [C. injector] sizing: spray half-angle target 45 deg -> phi=0.463, A=2.41, Cd=0.254 (ideal max-flow theory)
+  [C. injector] sizing: 3 elements from ~1.5 kN per element
+  [C. injector] sizing: film cooling: 15% of fuel through 50 holes on the wall ring
+  [D. manifolds] torus headers: inlet duct 14.0 mm (1 feeders), outlet 15.0 mm (1), clocking 0 deg -> maldistribution 0.0%
+  [E. structure] closeout shell: hoop stress at MAWP 60 bar on r 86 mm vs 316L allowable 115 MPa (x1.25) -> t = 5.62 mm (1 mm print floor)
+  [F. structure/life] thermo-structural: peak hot-wall stress 15 MPa (thermal 11 + pressure 5), min yield margin 1715%, low-cycle-fatigue life 100000000 cycles (Manson-Coffin, Δε 0.01%)
+  [G. stability] acoustic screen: a=1273 m/s; 1L 3.4 / 1T 4.5 / 2T 7.4 kHz; injector stiffness 20% Pc; in n-τ band: 1L, 1T (screen flag — verify with a combustion-response analysis)
+  [V. verification] thrust closure: Cf x Pc x At = 5.000 kN vs required 5.000 kN (1.8e-14% error)
+  [V. verification] jacket regen re-march: peak T_wg 461.7 K vs stored 461.7 K; dP 1.26 vs 1.26 bar
+  [V. verification] Euler CFD: inviscid axisymmetric solve on the designed contour (residual floor): mass flow 2.131 vs quasi-1D 2.076 kg/s (+2.6%); first-order scheme, ~3% throat smearing is documented
+  [done] converged: all 14 ledger constraints satisfied after 1 iteration(s)
+  (66.9 s)
+
+Engine design 'tkl5-class-5kN-kerolox' (converged in 1 iteration(s))
+========================================================================
+  thrust (design ambient)            5.00 kN
+  chamber pressure                   20.0 bar
+  propellants / O/F                  lox/rp1 / 2.30
+  mass flow (ox + fuel)              2.127 kg/s (1.482 + 0.645)
+  Isp (design ambient / vacuum)      240 / 270 s
+  c* (delivered) / Cf                1716 m/s / 1.370
+  throat / exit diameter             48.2 / 89.9 mm
+  nozzle                             bell (80% bell), exit angle 10.8deg, divergence eff. 0.991
+  expansion / contraction ratio      3.5 / 12.0
+  chamber length / L*                73 mm / 1.10 m
+  cooling channels                   171 x 0.50 x 2.04 mm, hot wall 0.40 mm
+  peak hot-wall temperature          462 K
+  jacket pressure drop               1.3 bar
+  coolant outlet (injector inlet)    353 K
+  coolant feed pressure              60 bar
+  injector                           3 coax-swirl elements, stiffness 20% Pc
+  manifold maldistribution           0.0% (target 3%)
+  closeout shell                     5.62 mm 316L
+Constraint ledger:
+  [PASS] peak hot-wall temperature: 462 K (req: <= 800 K (cucrzr))
+  [PASS] jacket pressure drop: 1.3 bar (req: <= 30 bar budget)
+  [PASS] single-phase coolant: single-phase/supercritical (req: no boiling in the jacket)
+  [PASS] land at throat: 0.40 mm (req: >= 0.4 mm (lpbf))
+  [PASS] coolant-side wall (coking): 455 K (req: <= 590 K (RP-1 coking limit, SP-8087))
+  [PASS] injector tangential ports: d 5.33 mm (req: >= 0.4 mm (lpbf))
+  [PASS] injector supply pressure: regen outlet 58.8 bar (req: >= Pc + drop = 24.0 bar)
+  [PASS] channel-flow uniformity: 0.0% (req: <= 3% (design target))
+  [PASS] hot-wall yield margin: 1715% (req: combined thermal+pressure stress < derated yield)
+  [PASS] low-cycle-fatigue life: 100000000 cycles (req: >= 4 required)
+  [PASS] injector chug stiffness: 20% Pc (req: >= 15% Pc (chug guard))
+  [PASS] verify: thrust closure: 5.000 kN (1.8e-14% off) (req: F = Cf Pc At reproduces the requirement)
+  [PASS] verify: jacket regen re-march: dT_peak 0.00 K, d(dP) 0.00% (req: independent re-solve reproduces the optimizer's solution)
+  [PASS] verify: Euler CFD mass flow: +2.6% vs quasi-1D (req: <= 5% (2-D flow on the actual contour))
+
+  figures written
+  meshing chamber jacket at 1.0 mm voxels ...
+  chamber_jacket.stl: 1100832 tris, watertight, V 796.6 cm^3, mass 7.090 kg, voxel 1.00 mm, bbox 266x234x218 mm
+  meshing injector head at 0.6 mm voxels ...
+  injector_head.stl: 732898 tris, watertight, V 1155.2 cm^3, mass 9.219 kg, voxel 0.60 mm, bbox 85x177x177 mm
+  assembling multi-shell engine ...
+  engine_assembly.stl: 1833730 tris, watertight, V 1951.9 cm^3, mass n/a, voxel 1.00 mm, bbox 343x234x218 mm
+  report written
+
+written:
+  cross_section    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/cross_section.png
+  injector_face    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/injector_face.png
+  wall_temperature /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/wall_temperature.png
+  chamber_jacket   /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/chamber_jacket.stl
+  injector_head    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/injector_head.stl
+  engine_assembly  /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/engine_assembly.stl
+  trace            /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/trace.md
+  report           /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/tkl5/report.md

@@ -1,0 +1,104 @@
+designing 'rdd-class-20kN-methalox-aerospike': 20.0 kN lox/ch4 at Pc 30 bar (deterministic encoded-rule pipeline — full trace below)
+  [0. setup] mixture ratio: O/F = 3.20 (preset default)
+  [0. setup] combustion gas: equilibrium thermochemistry (ch4+LOX, O/F 3.20, Pc 30 bar): T_c=3488 K, frozen gamma=1.208, M=20.6 g/mol, c*=1827 m/s; products H2O 45%, CO 20%, H2 11%, CO2 10% (~2-3% vs CEA)
+  [0. setup] materials/process: liner cucrzr (k=330 W/mK, T_limit=800 K), closeout 316L, process lpbf (laser powder-bed fusion)
+  [0. setup] coolant inlet temperature: 118 K: 3 K subcooled below saturation at 2 bar (typical run-tank condition)
+  [0. setup] spike coolant: spike circuit cooled by the oxidizer (Oxygen) at 94 K inlet - the arrangement LEAP 71 used on its aerospike; fuel cools the cowl/chamber outer wall
+  [A. performance] expansion ratio: perfect expansion at Pa = 101.3 kPa -> area ratio 4.74
+  [A. performance] nozzle contour: aerospike: axial exit (divergence lambda=1.000), truncated at 30% of the ideal spike -> truncation loss dCf=0.0191 (1.3% of Cf; closed-wake base pressure P_b=Pa, Angelino contour / Hagemann 1998)
+  [A. performance] throat sizing: shifting-equilibrium c*=1873 m/s x eta_c*=0.95; Cf=1.435 (incl. truncation) -> annular At=46.47 cm^2 (equiv. Dt 76.9 mm), mdot=7.837 kg/s, Isp=260 s
+  [A. performance] contraction ratio: throat D 76.9 mm -> contraction ratio 9.1 (small-engine sizing trend, clipped to [4, 15]) (keyed on the equivalent throat diameter)
+  [A. performance] L*: characteristic length L* = 1.1 m (lox/ch4 class value, Huzel & Huang table 4-1 range)
+  [A. performance] annular chamber: throat annulus: mean R 81.2 mm, gap 5.10 mm (cowl lip R 83.7 mm); chamber gap 82.9 mm, L_c 97 mm; spike 67 mm (30% of ideal 223 mm), base R 34.3 mm
+  [B. thermal] feed pressures: fuel 74 bar (cowl circuit), LOX 74 bar (spike circuit); jacket budget 30 bar each
+  [B. thermal] film-cooling credit: 187 g/s (10% of fuel) on the cowl wall at 600 K, Hatch-Papell effectiveness (spike gets no film credit)
+  [B. thermal] Bartz calibration: h_g x 0.80 (Bartz over-predicts LOX/CH4-class heat flux ~20-30%: ODREC, Appl. Sci. 14(1):71, 2024)
+  [B. thermal] cowl channel search: 77 regen solves -> 220 channels 0.50x1.17 mm, wall 0.40 mm: peak T_wg 290 K, dP 20.2 bar
+  [B. thermal] spike channel search: 61 regen solves -> 220 channels 0.50x3.04 mm, wall 0.40 mm: peak T_wg 545 K, dP 25.1 bar
+  [C. injector] injection states: ox from spike regen outlet: 154 K, 354 kg/m^3 at 48 bar; fuel from cowl regen outlet: 155 K, 357 kg/m^3 at 53 bar
+  [C. injector] sizing: spray half-angle target 45 deg -> phi=0.463, A=2.41, Cd=0.254 (ideal max-flow theory)
+  [C. injector] sizing: 13 elements from ~1.5 kN per element
+  [C. injector] sizing: film cooling: 10% of fuel through 110 holes on the wall ring
+  [C. injector] warning: fuel annulus gap 0.23 mm is very tight for printing/machining
+  [D. manifolds] cowl torus headers: inlet duct 14.0 mm (1 feeders), outlet 15.0 mm (1) -> maldistribution 0.1%
+  [D. manifolds] spike torus headers: inlet duct 18.5 mm (1 feeders), outlet 25.0 mm (1) -> maldistribution 0.0%
+  [E. structure] closeout shell: hoop stress at MAWP 74 bar on r 124 mm vs 316L allowable 115 MPa (x1.25) -> t = 9.93 mm (1 mm print floor)
+  [F. structure/life] cowl thermo-structural: peak stress 39 MPa, min yield margin 731%, LCF life 100000000 cycles
+  [F. structure/life] spike thermo-structural: peak stress 92 MPa, min yield margin 162%, LCF life 100000000 cycles
+  [G. stability] annular acoustic screen: a=1306 m/s; 1L 4.0kHz, 2L 8.0kHz, 1T-ann 2.6kHz, 2T-ann 5.1kHz, 3T-ann 7.7kHz; injector stiffness 20% Pc; in n-tau band: 1L, 1T-ann (screen flag)
+  [V. verification] thrust closure: Cf x Pc x At = 20.000 kN vs required 20.000 kN (1.8e-14% error)
+  [V. verification] cowl regen re-march: peak T_wg 290.2 K vs stored 290.2 K; dP 20.23 vs 20.23 bar
+  [V. verification] spike regen re-march: peak T_wg 545.1 K vs stored 545.1 K; dP 25.14 vs 25.14 bar
+  [V. verification] Euler CFD: skipped: the solver meshes closed axisymmetric nozzles; the aerospike gas path is covered by the regen re-march and the Angelino continuity closure
+  [done] converged: all 21 ledger constraints satisfied after 1 iteration(s)
+  (173.3 s)
+
+Engine design 'rdd-class-20kN-methalox-aerospike' (converged in 1 iteration(s))
+========================================================================
+  thrust (design ambient)            20.00 kN
+  chamber pressure                   30.0 bar
+  propellants / O/F                  lox/ch4 / 3.20
+  mass flow (ox + fuel)              7.837 kg/s (5.971 + 1.866)
+  Isp (design ambient / vacuum)      260 / 284 s
+  c* (delivered) / Cf                1779 m/s / 1.435
+  throat / exit diameter             76.9 / 167.4 mm
+  nozzle                             aerospike, exit angle 0.0deg, divergence eff. 1.000
+  expansion / contraction ratio      4.7 / 9.1
+  chamber length / L*                97 mm / 1.10 m
+  cooling channels                   220 x 0.50 x 1.17 mm, hot wall 0.40 mm
+  peak hot-wall temperature          290 K
+  jacket pressure drop               20.2 bar
+  coolant outlet (injector inlet)    155 K
+  coolant feed pressure              74 bar
+  injector                           13 coax-swirl elements, stiffness 20% Pc
+  manifold maldistribution           0.1% (target 3%)
+  closeout shell                     9.93 mm 316L
+  annular throat                     mean R 81.2 mm, gap 5.10 mm (cowl lip R 83.7 mm)
+  spike                              67 mm (30% of ideal 223 mm), base R 34.3 mm
+  spike cooling (LOX)                220 x 0.50 x 3.04 mm, peak T_wg 545 K, dP 25.1 bar
+  LOX feed pressure                  74 bar
+Constraint ledger:
+  [PASS] cowl: peak hot-wall temperature: 290 K (req: <= 800 K (cucrzr))
+  [PASS] cowl: jacket pressure drop: 20.2 bar (req: <= 30 bar budget)
+  [PASS] cowl: single-phase coolant: single-phase/supercritical (req: no boiling in the jacket)
+  [PASS] cowl: land at min radius: 1.90 mm (req: >= 0.4 mm (lpbf))
+  [PASS] spike: peak hot-wall temperature: 545 K (req: <= 800 K (cucrzr))
+  [PASS] spike: jacket pressure drop: 25.1 bar (req: <= 30 bar budget)
+  [PASS] spike: single-phase coolant: single-phase/supercritical (req: no boiling in the jacket)
+  [PASS] spike: land at min radius: 0.49 mm (req: >= 0.4 mm (lpbf))
+  [PASS] injector tangential ports: d 6.21 mm (req: >= 0.4 mm (lpbf))
+  [PASS] injector fuel supply: cowl outlet 53.4 bar (req: >= Pc + drop = 36.0 bar)
+  [PASS] injector LOX supply: spike outlet 48.4 bar (req: >= Pc + drop = 36.0 bar)
+  [PASS] cowl: channel-flow uniformity: 0.1% (req: <= 3% (design target))
+  [PASS] spike: channel-flow uniformity: 0.0% (req: <= 3% (design target))
+  [PASS] cowl: hot-wall yield margin: 731% (req: combined stress < derated yield)
+  [PASS] cowl: low-cycle-fatigue life: 100000000 cycles (req: >= 4 required)
+  [PASS] spike: hot-wall yield margin: 162% (req: combined stress < derated yield)
+  [PASS] spike: low-cycle-fatigue life: 100000000 cycles (req: >= 4 required)
+  [PASS] injector chug stiffness: 20% Pc (req: >= 15% Pc (chug guard))
+  [PASS] verify: thrust closure: 20.000 kN (1.8e-14% off) (req: F = Cf Pc At reproduces the requirement)
+  [PASS] verify: cowl regen re-march: dT_peak 0.00 K, d(dP) 0.00% (req: independent re-solve reproduces the optimizer's solution)
+  [PASS] verify: spike regen re-march: dT_peak 0.00 K, d(dP) 0.00% (req: independent re-solve reproduces the optimizer's solution)
+
+  figures written
+  meshing aerospike_cowl at 1.0 mm voxels ...
+  aerospike_cowl.stl: 1261174 tris, watertight, V 1578.1 cm^3, mass 14.045 kg, voxel 1.00 mm, bbox 225x342x322 mm
+  meshing aerospike_spike at 1.0 mm voxels ...
+  aerospike_spike.stl: 762566 tris, watertight, V 1554.0 cm^3, mass 13.831 kg, voxel 1.00 mm, bbox 231x157x157 mm
+  meshing injector_ring at 0.6 mm voxels ...
+  injector_ring.stl: 1940660 tris, watertight, V 1709.5 cm^3, mass 13.642 kg, voxel 0.60 mm, bbox 92x254x254 mm
+  assembling multi-shell engine ...
+  engine_assembly.stl: 3964400 tris, watertight, V 4841.6 cm^3, mass n/a, voxel 1.00 mm, bbox 323x342x322 mm
+  report written
+
+written:
+  cross_section    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/cross_section.png
+  injector_face    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/injector_face.png
+  wall_temperature /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/wall_temperature.png
+  wall_temperature_spike /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/wall_temperature_spike.png
+  aerospike_cowl   /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/aerospike_cowl.stl
+  aerospike_spike  /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/aerospike_spike.stl
+  injector_ring    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/injector_ring.stl
+  engine_assembly  /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/engine_assembly.stl
+  trace            /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/trace.md
+  report           /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/aspike20/report.md

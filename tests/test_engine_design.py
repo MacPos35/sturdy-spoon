@@ -210,3 +210,14 @@ def test_verify_can_be_disabled():
                       name="noverify")
     d = design_engine(spec, **FAST)
     assert not any(i.name.startswith("verify") for i in d.ledger)
+
+
+def test_parity_example_specs_parse():
+    """The LEAP 71 parity lineup specs must stay loadable."""
+    for f, nozzle in (("engine_5kn_kerolox_tkl5", "bell"),
+                      ("engine_20kn_methalox_bell", "bell"),
+                      ("engine_20kn_methalox_aerospike", "aerospike")):
+        spec = EngineSpec.from_yaml(f"examples/{f}.yaml")
+        assert spec.nozzle_type == nozzle
+        assert spec.credit_film is True
+        assert isinstance(spec.bartz_factor, float)

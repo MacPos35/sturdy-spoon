@@ -20,8 +20,11 @@ designing 'demo-5kN-methalox': 5.0 kN lox/ch4 at Pc 20 bar (deterministic encode
   [E. structure] closeout shell: hoop stress at MAWP 60 bar on r 87 mm vs 316L allowable 115 MPa (x1.25) -> t = 5.65 mm (1 mm print floor)
   [F. structure/life] thermo-structural: peak hot-wall stress 53 MPa (thermal 49 + pressure 5), min yield margin 421%, low-cycle-fatigue life 100000000 cycles (Manson-Coffin, Δε 0.05%)
   [G. stability] acoustic screen: a=1300 m/s; 1L 3.5 / 1T 4.6 / 2T 7.6 kHz; injector stiffness 20% Pc; in n-τ band: 1L, 1T (screen flag — verify with a combustion-response analysis)
-  [done] converged: all 10 ledger constraints satisfied after 1 iteration(s)
-  (42.3 s)
+  [V. verification] thrust closure: Cf x Pc x At = 5.000 kN vs required 5.000 kN (0.0e+00% error)
+  [V. verification] jacket regen re-march: peak T_wg 486.5 K vs stored 486.5 K; dP 5.44 vs 5.44 bar
+  [V. verification] Euler CFD: inviscid axisymmetric solve on the designed contour (residual floor): mass flow 2.061 vs quasi-1D 2.005 kg/s (+2.8%); first-order scheme, ~3% throat smearing is documented
+  [done] converged: all 13 ledger constraints satisfied after 1 iteration(s)
+  (64.8 s)
 
 Engine design 'demo-5kN-methalox' (converged in 1 iteration(s))
 ========================================================================
@@ -54,22 +57,25 @@ Constraint ledger:
   [PASS] hot-wall yield margin: 421% (req: combined thermal+pressure stress < derated yield)
   [PASS] low-cycle-fatigue life: 100000000 cycles (req: >= 4 required)
   [PASS] injector chug stiffness: 20% Pc (req: >= 15% Pc (chug guard))
+  [PASS] verify: thrust closure: 5.000 kN (0.0e+00% off) (req: F = Cf Pc At reproduces the requirement)
+  [PASS] verify: jacket regen re-march: dT_peak 0.00 K, d(dP) 0.00% (req: independent re-solve reproduces the optimizer's solution)
+  [PASS] verify: Euler CFD mass flow: +2.8% vs quasi-1D (req: <= 5% (2-D flow on the actual contour))
 
   figures written
-  meshing chamber jacket at 1.2 mm voxels ...
-  chamber_jacket.stl: 780842 tris, watertight, V 845.2 cm^3, mass 7.522 kg, voxel 1.20 mm, bbox 268x248x220 mm
-  meshing injector head at 0.7 mm voxels ...
-  injector_head.stl: 558666 tris, watertight, V 1151.0 cm^3, mass 9.185 kg, voxel 0.70 mm, bbox 86x177x177 mm
+  meshing chamber jacket at 1.0 mm voxels ...
+  chamber_jacket.stl: 1192350 tris, watertight, V 860.5 cm^3, mass 7.658 kg, voxel 1.00 mm, bbox 268x248x220 mm
+  meshing injector head at 0.6 mm voxels ...
+  injector_head.stl: 752244 tris, watertight, V 1151.0 cm^3, mass 9.185 kg, voxel 0.60 mm, bbox 86x176x176 mm
   assembling multi-shell engine ...
-  engine_assembly.stl: 1339508 tris, watertight, V 1996.2 cm^3, mass n/a, voxel 1.20 mm, bbox 343x248x220 mm
+  engine_assembly.stl: 1944594 tris, watertight, V 2011.4 cm^3, mass n/a, voxel 1.00 mm, bbox 343x248x220 mm
   report written
 
 written:
-  cross_section    output/engine/cross_section.png
-  injector_face    output/engine/injector_face.png
-  wall_temperature output/engine/wall_temperature.png
-  chamber_jacket   output/engine/chamber_jacket.stl
-  injector_head    output/engine/injector_head.stl
-  engine_assembly  output/engine/engine_assembly.stl
-  trace            output/engine/trace.md
-  report           output/engine/report.md
+  cross_section    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/cross_section.png
+  injector_face    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/injector_face.png
+  wall_temperature /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/wall_temperature.png
+  chamber_jacket   /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/chamber_jacket.stl
+  injector_head    /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/injector_head.stl
+  engine_assembly  /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/engine_assembly.stl
+  trace            /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/trace.md
+  report           /tmp/claude-0/-home-user-sturdy-spoon/4ddab005-5bab-5ed0-b0ae-7c1389d87ec4/scratchpad/parity/demo/report.md

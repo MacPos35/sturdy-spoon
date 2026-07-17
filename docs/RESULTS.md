@@ -147,14 +147,16 @@ cryosim design examples/engine_5kn_methalox.yaml -o output/engine
 → chamber gas from equilibrium thermochemistry (CH4+LOX, O/F 3.2, 20 bar):
   Tc 3433 K, γ 1.21, M 20.5 g/mol; products H2O 44% CO 20% H2 11% CO2 10%
 → shifting-equilibrium c* 1864 m/s (recombination through the nozzle credited);
-  optimize_of finds peak-Isp O/F 3.2 — matching CEA's mildly-rich optimum
-→ Dt 48 mm, ε 3.9, thrust-optimized 80% bell (exit angle 10.5°,
-  divergence eff. 0.992 vs 0.983 for a 15° cone → +0.9% Cf)
-→ cooling channels sized under the LPBF land floor, peak wall < 800 K
-→ 3-element coax-swirl injector fed the 500+ K supercritical regen outlet
+  the O/F 3.2 preset sits at CEA's mildly-rich optimum
+→ Dt 48 mm, ε 3.5 (perfect SL expansion), 80% bell (exit angle 10.7°,
+  divergence eff. 0.991 vs 0.983 for a 15° cone → +0.8% Cf)
+→ cooling channels sized under the LPBF land floor, peak wall 487 K < 800 K
+→ 3-element coax-swirl injector fed the supercritical regen outlet
 → torus manifolds blended organically into the wall; domed injector
 → hardware detail: instrumentation/igniter boss ring, mounting feet, flared stubs
-→ closeout hoop sizing, 7/7 ledger constraints PASS
+→ closeout hoop sizing, then the generate→verify pass: thrust closure exact,
+  regen re-march reproduces the optimizer, Euler CFD mass flow +2.8%
+→ 13/13 ledger constraints PASS (incl. the 3 verify: items)
 → watertight STLs: chamber_jacket / injector_head / engine_assembly
 ```
 
@@ -186,11 +188,38 @@ The full explainable decision record (`trace.md`) and performance report
 engineering logic — two runs of the same spec produce byte-identical
 designs (there's a regression test for that).
 
+## 8b — LEAP 71 reference engines (parity lineup)
+
+The pipeline designs cryosim equivalents of **all three engines LEAP 71
+has publicly hot-fired**, from the published requirements only — full
+comparison, inputs, ledgers and honesty notes in
+**[leap71_parity.md](results/leap71_parity.md)**:
+
+* **TKL-5 class** — 5 kN LOX/RP-1 at O/F 2.3, CuCrZr: 240/270 s (SL/vac),
+  the kerolox **coking guard** held by the credited film
+  ([console](results/console_tkl5.txt));
+* **20 kN methalox bell** — 262/290 s at the shared 30-bar point, 13/13
+  ledger PASS ([console](results/console_bell20.txt));
+* **20 kN methalox aerospike** — same requirements and physics as the
+  bell: toroidal chamber, Angelino spike (30% length), fuel-cooled cowl +
+  **LOX-cooled spike**, annular injector; 260/284 s (the ~1% gap to the
+  bell is the truncation loss — the spike's payoff is altitude
+  compensation), 21/21 ledger PASS, four watertight printed parts
+  ([console](results/console_aspike20.txt)).
+
+![TKL-5-class cross section](results/tkl5_cross_section.png)
+
+![20 kN bell cross section](results/bell20_cross_section.png)
+
+![20 kN aerospike cross section](results/aspike20_cross_section.png)
+
+![20 kN aerospike injector face](results/aspike20_injector_face.png)
+
 ## 9 — Computed vs literature values
 
 ```
 cryosim benchmark --full
-→ 22/22 within tolerance/band
+→ 39/39 within tolerance/band
 ```
 
 Every computed number next to its NIST / handbook / experiment-band

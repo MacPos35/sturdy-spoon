@@ -74,3 +74,32 @@ def test_soot_predicted_only_when_very_rich():
     assert not equilibrium_combustion("ch4", 2.0, 20e5).soot_predicted
     rich = equilibrium_combustion("ch4", 1.0, 20e5)
     assert rich.soot_predicted and rich.carbon_activity >= 1.0
+
+
+# ---------------------------------------------------------------- RP-1
+
+
+def test_rp1_fractional_formula():
+    """RP-1 is the CEA CH1.9423 surrogate: fractional atoms must work."""
+    from cryosim.combustion_equilibrium import FUELS
+    f = FUELS["rp1"]
+    assert f.nH == pytest.approx(1.9423)
+    # M(CH1.9423) = 12.0107 + 1.9423*1.00794 = 13.97 g/mol
+    assert f.molar_mass == pytest.approx(13.97e-3, rel=1e-3)
+    # complete combustion needs 2 + 1.9423/4 mol O per C -> O/F 3.40
+    assert stoichiometric_of("rp1") == pytest.approx(3.40, rel=0.01)
+
+
+def test_rp1_aliases_identical():
+    a = equilibrium_combustion("rp1", 2.3, 20e5)
+    b = equilibrium_combustion("kerosene", 2.3, 20e5)
+    c = equilibrium_combustion("RP-1", 2.3, 20e5)
+    assert a.T_c == b.T_c == c.T_c
+
+
+def test_rp1_reasonable_numbers():
+    r = equilibrium_combustion("rp1", 2.3, 20e5)
+    assert 3300 < r.T_c < 3600          # CEA ~3540 K at 20 bar
+    assert 1.15 < r.gamma < 1.26
+    assert 0.019 < r.molar_mass < 0.025
+    assert not r.soot_predicted         # chamber gas at O/F 2.3 is not sooting

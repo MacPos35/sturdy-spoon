@@ -72,7 +72,9 @@ from .combustion_stability import StabilityResult, stability_screen
 G0 = 9.80665
 
 #: Default mixture ratios for the shipped gas presets (nominal CEA-ish).
-DEFAULT_OF = {"lox/ch4": 3.2, "lox/ethanol": 1.7}
+#: lox/rp1 = 2.3: the kerolox operating point LEAP 71's TKL-5 ran at
+#: (slightly rich of the CEA peak-Isp ~2.6 — standard for soot margin).
+DEFAULT_OF = {"lox/ch4": 3.2, "lox/ethanol": 1.7, "lox/rp1": 2.3}
 
 #: Liner materials: conductivity + hot-wall temperature limit.
 LINER_MATERIALS = {
@@ -362,7 +364,7 @@ def _contraction_ratio_rule(Rt: float) -> tuple[float, str]:
 
 
 def _l_star_rule(propellants: str) -> tuple[float, str]:
-    table = {"lox/ch4": 1.1, "lox/ethanol": 1.5}
+    table = {"lox/ch4": 1.1, "lox/ethanol": 1.5, "lox/rp1": 1.1}
     L = table.get(propellants, 1.2)
     return L, (f"characteristic length L* = {L:.1f} m "
                f"({propellants} class value, Huzel & Huang table 4-1 range)")
@@ -447,10 +449,19 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
     oxidizer = Fluid(ox_name)
     T_cool_in = spec.coolant_inlet_T
     if T_cool_in is None:
-        T_cool_in = coolant.T_sat(2e5) - 3.0
-        log("0. setup", "coolant inlet temperature",
-            f"{T_cool_in:.0f} K: 3 K subcooled below saturation at 2 bar "
-            "(typical run-tank condition)")
+        T_sat2 = coolant.T_sat(2e5)
+        if T_sat2 > 320.0:
+            # storable fuel (kerosene/ethanol class): loaded at ambient,
+            # not near saturation like a cryogen
+            T_cool_in = 288.15
+            log("0. setup", "coolant inlet temperature",
+                f"{T_cool_in:.0f} K: ambient (storable fuel; the "
+                "near-saturation rule only applies to cryogens)")
+        else:
+            T_cool_in = T_sat2 - 3.0
+            log("0. setup", "coolant inlet temperature",
+                f"{T_cool_in:.0f} K: 3 K subcooled below saturation at 2 bar "
+                "(typical run-tank condition)")
     # feed pressure rule: chamber + injector drop (+ manifold allowance)
     # + jacket budget + 10% line margin
     def feed_pressure(dp_b):

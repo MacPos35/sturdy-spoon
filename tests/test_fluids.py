@@ -12,6 +12,16 @@ def test_aliases():
     assert canonical_name("LOX") == "Oxygen"
     assert canonical_name("lch4") == "Methane"
     assert canonical_name("Ethanol") == "Ethanol"
+    # RP-1 maps to its standard single-component surrogate
+    assert canonical_name("RP-1") == "n-Dodecane"
+    assert canonical_name("kerosene") == "n-Dodecane"
+
+
+def test_rp1_surrogate_liquid_density():
+    rp1 = Fluid("rp1")
+    # n-dodecane at 288 K, 1 atm: ~750 kg/m3 (NIST); RP-1 itself is ~810 —
+    # the surrogate is the documented, slightly conservative stand-in
+    assert rp1.state_TP(288.15, 101325).rho == pytest.approx(750.0, rel=0.02)
 
 
 def test_lox_saturation_at_1atm():

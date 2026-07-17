@@ -27,6 +27,10 @@ CASES = [
     ("ch4", 3.5, 100e5, (3550, 3720), (1810, 1910)),
     ("h2", 6.0, 20e5, (3350, 3560), (2250, 2470)),
     ("ethanol", 1.7, 20e5, (3230, 3450), (1650, 1810)),
+    # kerolox: the classic 1000-psia CEA anchor (Sutton tab. 5-5: Tc ~3670 K,
+    # c* ~1800 m/s at O/F 2.27) and the 20-bar operating point
+    ("rp1", 2.27, 68.05 * 101325, (3550, 3720), (1730, 1840)),
+    ("rp1", 2.3, 20e5, (3390, 3560), (1700, 1820)),
 ]
 
 
@@ -75,6 +79,8 @@ def test_stoichiometric_values():
     assert stoichiometric_of("ch4") == pytest.approx(3.99, rel=0.02)
     # 2 H2 + O2 -> 2 H2O : O/F = 32/(2*2.016) = 7.94
     assert stoichiometric_of("h2") == pytest.approx(7.94, rel=0.02)
+    # CH1.9423 + 1.4856 O2 -> CO2 + 0.9712 H2O : O/F = 3.40
+    assert stoichiometric_of("rp1") == pytest.approx(3.40, rel=0.02)
 
 
 def test_pressure_raises_temperature():

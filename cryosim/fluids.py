@@ -39,6 +39,12 @@ FLUID_ALIASES = {
     "ethanol": "Ethanol",
     "water": "Water",
     "helium": "Helium",
+    # RP-1 has no CoolProp EOS; n-dodecane is the standard single-component
+    # surrogate (density ~750 vs RP-1's ~810 kg/m^3 at 288 K, similar cp/mu
+    # trends) — slightly conservative for regen cooling capacity.
+    "rp1": "n-Dodecane",
+    "rp-1": "n-Dodecane",
+    "kerosene": "n-Dodecane",
 }
 
 

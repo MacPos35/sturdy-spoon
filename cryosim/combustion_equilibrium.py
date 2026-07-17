@@ -102,12 +102,17 @@ _M = np.array([_MOLAR[s] for s in _SPECIES])
 
 @dataclass(frozen=True)
 class Fuel:
-    """A CxHyOz fuel: atoms per molecule + standard enthalpy of formation."""
+    """A CxHyOz fuel: atoms per molecule + standard enthalpy of formation.
+
+    Atom counts may be fractional: distillate fuels (RP-1) are modeled the
+    way CEA models them, as an average-formula surrogate (e.g. CH1.9423)
+    rather than a single molecule.
+    """
 
     name: str
-    nC: int
-    nH: int
-    nO: int
+    nC: float
+    nH: float
+    nO: float
     dHf: float            # J/mol, at 298.15 K (liquid for storables)
 
     @property
@@ -125,6 +130,13 @@ FUELS = {
     "ethanol": Fuel("ethanol", 2, 6, 1, -277000.0),   # liquid
     "c3h8": Fuel("propane", 3, 8, 0, -104700.0),
     "propane": Fuel("propane", 3, 8, 0, -104700.0),
+    # RP-1: CEA's average-formula surrogate CH1.9423, liquid, with the CEA
+    # thermo-library heat of formation -24.717 kJ/mol per CH1.9423 unit
+    # (Gordon & McBride thermo data; also quoted in McBride/Zehe NASA
+    # TP-2002-211556 for RP-1).
+    "rp1": Fuel("RP-1", 1, 1.9423, 0, -24717.0),
+    "rp-1": Fuel("RP-1", 1, 1.9423, 0, -24717.0),
+    "kerosene": Fuel("RP-1", 1, 1.9423, 0, -24717.0),
 }
 
 _M_O2 = 31.9988e-3

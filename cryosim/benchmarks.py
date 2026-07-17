@@ -175,6 +175,30 @@ def run_benchmarks(full: bool = False) -> list[BenchmarkRow]:
                       "peak-Isp O/F, LOX/CH4 (shifting)",
                       of_opt, 3.0, 3.6, "-",
                       "NASA CEA optimum (mildly rich of stoich 3.99)"))
+    # kerolox (RP-1 = CEA CH1.9423 surrogate) vs the classic CEA anchors
+    eq_rp = equilibrium_combustion("rp1", 2.27, 68.05 * 101325.0)
+    rows.append(_band("combustion (equil.)",
+                      "flame temp T_c, LOX/RP-1 O/F2.27 @68atm",
+                      eq_rp.T_c, 3550.0, 3720.0, "K",
+                      "NASA CEA equil. ~3670-3700 K (Sutton tab. 5-5 "
+                      "class); model runs ~2% cool (documented)"))
+    rows.append(_band("combustion (equil.)",
+                      "shifting c*, LOX/RP-1 O/F2.27 @68atm",
+                      shifting_c_star("rp1", 2.27, 68.05 * 101325.0),
+                      1770.0, 1870.0, "m/s",
+                      "CEA / Sutton: c* ~1774-1800 m/s at this point"))
+    from .combustion_equilibrium import stoichiometric_of
+    rows.append(_point("combustion (equil.)",
+                       "stoichiometric O/F, RP-1 (CH1.9423)",
+                       stoichiometric_of("rp1"), 3.403, "-",
+                       "mass balance: (2+1.9423/4) O per C on CH1.9423",
+                       kind="exact", tol=1e-3))
+    of_opt_rp, _ = optimize_of("rp1", 20e5, objective="isp_vac",
+                               expansion_ratio=40.0)
+    rows.append(_band("combustion (equil.)",
+                      "peak-Isp O/F, LOX/RP-1 (shifting)",
+                      of_opt_rp, 2.3, 2.9, "-",
+                      "CEA optimum ~2.6 (mildly rich of stoich 3.40)"))
     rows.append(_point("combustion", "Bartz viscosity SI constant",
                        1.184e-7, 46.6e-10 * (0.4536 / 0.0254) * 1.8**0.6,
                        "Pa s (g/mol)^-0.5 K^-0.6",

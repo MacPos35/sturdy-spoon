@@ -41,8 +41,11 @@ Assumptions / limitations
   and pass ``combustion_gas`` for design work).
 * All sub-model limitations (Bartz-class cooling, ideal swirl theory,
   reduced-order manifolds) carry through unchanged — see each module.
-* Film cooling is sized hydraulically (injector ring) but its thermal
-  benefit is NOT modeled in the regen solution — conservative.
+* Film cooling is sized hydraulically (injector ring); its thermal benefit
+  is credited only when ``credit_film`` is set, via the conservative
+  gaseous-film effectiveness model in ``regen_model.FilmCooling`` (no
+  liquid-film run, no latent heat). Kerolox designs get a coolant-side
+  coking guard (~590 K wetted wall, NASA SP-8087) in the ledger.
 * The rules encode small-engine (kN-class) student/early-design practice;
   numbers must be re-examined for other classes.
 """
@@ -66,6 +69,7 @@ from .injector_design import InjectorDesign, design_injector
 from .line_sizing import MATERIALS
 from .manifold_design import ManifoldSystemDesign, design_manifolds
 from .optimize import ChannelDesignResult, optimize_channels
+from .regen_model import FilmCooling
 from .thermostructural import ThermoStructuralResult, analyze as ts_analyze
 from .combustion_stability import StabilityResult, stability_screen
 
@@ -85,6 +89,13 @@ LINER_MATERIALS = {
     "inconel718": {"k_wall": 12.0, "T_limit": 1150.0, "rho": 8190.0,
                    "note": "IN718 — poor conductor, thin walls only"},
 }
+
+#: Coolant-side wall temperature limit for coking coolants [K]: kerosene
+#: thermally decomposes and deposits carbon on the wetted wall above
+#: ~560-590 K (NASA SP-8087; Huzel & Huang ch. 4) — a hard quality limit
+#: real kerolox regen engines design to. Cryogens don't coke down here
+#: (methane's coking onset is ~950 K, far above any wall this tool passes).
+COKING_LIMIT = {"rp1": 590.0, "rp-1": 590.0, "kerosene": 590.0}
 
 #: Manufacturing-process feature floors [m].
 PROCESSES = {
@@ -121,6 +132,8 @@ class EngineSpec:
     stiffness: float = 0.20             # injector dP / Pc
     spray_half_angle_deg: float = 45.0
     film_fraction: float = 0.10
+    credit_film: bool = False           # credit the film thermally (regen)
+    bartz_factor: float = 1.0           # Bartz calibration (0.8: LOX/CH4)
     thrust_per_element: float = 1.5e3   # N
     expansion_ratio_cap: float = 25.0   # vacuum-design cap
     helix_angle_deg: float = 0.0
@@ -141,7 +154,7 @@ class EngineSpec:
             # non-string spec fields
             if k not in ("propellants", "liner", "closeout_material",
                          "process", "name", "combustion_gas",
-                         "nozzle_type") \
+                         "nozzle_type", "credit_film") \
                     and isinstance(v, str):
                 d[k] = float(v)
         if isinstance(d.get("combustion_gas"), dict):
@@ -561,11 +574,38 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
             "channel_width": (proc["min_channel_width"], 3.0e-3),
             "t_wall": (proc["min_wall"], 1.5e-3),
         }
+        film = None
+        if spec.credit_film and spec.film_fraction > 0:
+            T_film = 600.0        # conservative post-regen manifold temp
+            try:
+                cp_film = coolant.state_TP(T_film, Pc).cp
+            except ValueError:
+                cp_film = 2500.0
+            film = FilmCooling(mdot=spec.film_fraction * mdot_fuel,
+                               T_inject=T_film, cp=cp_film)
+            log("B. thermal", "film-cooling credit",
+                f"{film.mdot*1e3:.0f} g/s ({spec.film_fraction*100:.0f}% of "
+                f"fuel) credited as a gaseous film at {T_film:.0f} K "
+                f"(cp {cp_film:.0f} J/kgK), Hatch-Papell effectiveness "
+                "decay (NASA TN D-130) — no liquid-film or latent-heat "
+                "credit (conservative)")
+        if spec.bartz_factor != 1.0:
+            log("B. thermal", "Bartz calibration",
+                f"h_g x {spec.bartz_factor:.2f} (Bartz over-predicts "
+                "LOX/CH4-class heat flux ~20-30%: ODREC, Appl. Sci. "
+                "14(1):71, 2024)")
         cd = optimize_channels(
             contour, gas, coolant, Pc, mdot_fuel, T_cool_in, P_inlet,
             dp_budget=dp_budget, k_wall=liner["k_wall"], bounds=bounds,
             n_random=n_random, n_polish=n_polish,
-            min_land=proc["min_land"])
+            min_land=proc["min_land"],
+            film=film, bartz_factor=spec.bartz_factor)
+        if film is not None and cd.result.film_effectiveness is not None:
+            i_th = int(np.argmin(np.abs(contour.x - contour.x_throat)))
+            log("B. thermal", "film effectiveness",
+                f"eta = {cd.result.film_effectiveness[i_th]:.2f} at the "
+                f"throat, {cd.result.film_effectiveness[-1]:.2f} at the "
+                "exit")
         log("B. thermal", "channel search",
             f"{cd.n_evaluations} regen solves -> "
             f"{cd.channels.n_channels} channels "
@@ -575,6 +615,8 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
             f"K, dP {cd.dp/1e5:.1f} bar")
 
         boiling = bool(cd.result.boiling_detected)
+        T_coke = COKING_LIMIT.get(fuel_name.strip().lower())
+        T_wc_max = float(cd.result.T_wc.max())
         ledger += [
             LedgerItem("peak hot-wall temperature",
                        cd.peak_T_wg <= liner["T_limit"],
@@ -592,6 +634,11 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
                        f">= {proc['min_land']*1e3:.1f} mm "
                        f"({spec.process})"),
         ]
+        if T_coke is not None:
+            ledger.append(LedgerItem(
+                "coolant-side wall (coking)", T_wc_max <= T_coke,
+                f"{T_wc_max:.0f} K",
+                f"<= {T_coke:.0f} K (RP-1 coking limit, SP-8087)"))
 
         # ---- repair rules for stage B ------------------------------------
         if boiling and not supercritical_forced:
@@ -620,6 +667,22 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
                 f"{liner['T_limit']:.0f} K even at a doubled dp budget — "
                 "consider a higher-k liner, lower Pc, or film-cooling "
                 "beyond what this model credits", ledger, trace)
+        if T_coke is not None and T_wc_max > T_coke:
+            if dp_budget < 2.0 * spec.dp_budget:
+                dp_budget *= 1.5
+                P_inlet = max(P_inlet, feed_pressure(dp_budget))
+                log("B. thermal", "REPAIR: raise dp budget (coking)",
+                    f"coolant-side wall {T_wc_max:.0f} K over the "
+                    f"{T_coke:.0f} K RP-1 coking limit; raising the jacket "
+                    f"budget to {dp_budget/1e5:.0f} bar for more coolant "
+                    "velocity")
+                last_error = "coolant-side coking"
+                continue
+            raise DesignError(
+                f"RP-1 coolant-side wall {T_wc_max:.0f} K exceeds the "
+                f"{T_coke:.0f} K coking limit even at a doubled dp budget — "
+                "enable the film-cooling credit (credit_film), raise "
+                "film_fraction, or lower Pc", ledger, trace)
 
         # ============ C. injector ==========================================
         outlet = cd.result.coolant_outlet

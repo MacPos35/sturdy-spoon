@@ -24,9 +24,14 @@ transcritical property variation.
 Assumptions / limitations (stated per the no-CFD design choice)
 ---------------------------------------------------------------
 * Quasi-1D: no circumferential variation, no streamline curvature effects,
-  no injector-region film/boundary-layer development (Bartz is known to
+  no injector-region boundary-layer development (Bartz is known to
   over-predict near the injector and, for CH4, by ~20-30% overall —
-  conservative for cooling design; see ODREC, Appl. Sci. 14(1):71, 2024).
+  conservative for cooling design; see ODREC, Appl. Sci. 14(1):71, 2024;
+  a ``bartz_factor`` calibration knob exposes that documented correction).
+* Film cooling: optionally credited via :class:`FilmCooling` — a
+  gaseous-film effectiveness decay (Hatch & Papell, NASA TN D-130) with
+  no liquid-film run and no latent-heat credit, i.e. deliberately the
+  conservative end of film-cooling practice.
 * 1D wall conduction through the hot wall only; no axial conduction, no
   closeout-side heat loss (adiabatic outer wall), radiation neglected.
 * Single-phase coolant: no boiling model. Transcritical property variation
@@ -98,6 +103,32 @@ def fin_efficiency(h_c: float, k_wall: float, land: float, height: float) -> flo
     return float(np.tanh(mb) / mb) if mb > 1e-9 else 1.0
 
 
+@dataclass(frozen=True)
+class FilmCooling:
+    """Fuel-film cooling credit for the regen solution (gaseous-film model).
+
+    The film is treated as a gaseous coolant layer from the injection point
+    on: its effectiveness decays exponentially as the hot gas convects heat
+    into it, with decay rate = (gas-side heat pickup per unit length) /
+    (film capacity rate m_f cp_f) — the Hatch & Papell form (NASA TN D-130,
+    1959, tangential-slot gaseous film cooling). The wall then sees
+    ``T_aw_eff = T_aw - eta (T_aw - T_inject)``.
+
+    Deliberately conservative at this tier:
+
+    * no liquid-film run: a liquid film's evaporation heat sink (which holds
+      the wall near the coolant boiling point over the first chamber section)
+      is NOT credited — the film is "spent" faster than a real liquid film;
+    * ``cp`` is the vapor-phase heat capacity only, no latent-heat credit;
+    * ``T_inject`` should be the (hot) post-regen manifold temperature, not
+      the tank temperature.
+    """
+
+    mdot: float          # kg/s, film flow injected at the face
+    T_inject: float      # K, film temperature at injection
+    cp: float            # J/(kg K), vapor-phase film heat capacity
+
+
 @dataclass
 class RegenResult:
     """Axial distributions (hot-gas-side area basis) and coolant march."""
@@ -126,6 +157,9 @@ class RegenResult:
     #: density drops) and velocities/states downstream of the collapse are
     #: NOT physical. Raise the inlet pressure or enlarge the channels.
     pressure_collapsed: bool = False
+    #: Film-cooling effectiveness eta(x) when a film credit was applied
+    #: (None otherwise). T_aw above is then the film-reduced value.
+    film_effectiveness: np.ndarray | None = None
 
     @property
     def peak_wall_temperature(self) -> float:
@@ -147,7 +181,16 @@ class RegenCoolingModel:
         coolant: Fluid,
         counterflow: bool = True,
         sieder_tate: bool = True,
+        film: FilmCooling | None = None,
+        bartz_factor: float = 1.0,
     ):
+        """``film``: optional film-cooling credit (see :class:`FilmCooling`).
+
+        ``bartz_factor``: calibration multiplier on the Bartz coefficient.
+        Bartz is known to over-predict LOX/CH4 heat flux by ~20-30% (ODREC,
+        Appl. Sci. 14(1):71, 2024) — 0.8 is the documented calibration for
+        that propellant class; the default 1.0 keeps Bartz's conservatism.
+        """
         channels.validate_against(contour)
         self.contour = contour
         self.channels = channels
@@ -155,6 +198,8 @@ class RegenCoolingModel:
         self.coolant = coolant
         self.counterflow = counterflow
         self.sieder_tate = sieder_tate
+        self.film = film
+        self.bartz_factor = float(bartz_factor)
 
         # Precompute hot-gas station quantities (independent of coolant).
         ar = contour.area_ratio()
@@ -177,6 +222,28 @@ class RegenCoolingModel:
         ct, ch, gas, f = self.contour, self.channels, self.gas, self.coolant
         n = len(ct.x)
         order = range(n - 1, -1, -1) if self.counterflow else range(n)
+
+        # Film-cooling credit: effectiveness decays downstream of the face
+        # as the hot gas convects heat into the film (Hatch-Papell form,
+        # NASA TN D-130): eta(x) = exp(-int h_g 2 pi r dx / (m_f cp_f)).
+        # h_g for the decay integral is evaluated at a representative wall
+        # temperature (0.8 T_aw); the Bartz sigma is only weakly sensitive.
+        eta = None
+        T_aw_arr = self._T_aw
+        if self.film is not None and self.film.mdot > 0.0:
+            eta = np.empty(n)
+            cap = self.film.mdot * self.film.cp          # W/K
+            expo = 0.0
+            for j in range(n):
+                eta[j] = np.exp(-expo / cap)
+                if j < n - 1:
+                    hg_j = self.bartz_factor * bartz_h_g(
+                        gas, Pc, ct.Dt, ct.r_curv_throat,
+                        ct.area[j] / ct.At, self._mach[j],
+                        0.8 * self._T_aw[j])
+                    expo += hg_j * 2.0 * np.pi * ct.r[j] \
+                        * (ct.x[j + 1] - ct.x[j])
+            T_aw_arr = self._T_aw - eta * (self._T_aw - self.film.T_inject)
 
         st = f.state_TP(T_inlet, P_inlet)
         inlet_state = st
@@ -210,12 +277,13 @@ class RegenCoolingModel:
             # channels + land fins vs 2*pi*r of hot wall
             per_gas = 2.0 * np.pi * ct.r[i]
 
-            T_aw = self._T_aw[i]
+            T_aw = T_aw_arr[i]
             M = self._mach[i]
             ar = ct.area[i] / ct.At
 
             def residual(Twg):
-                hg = bartz_h_g(gas, Pc, ct.Dt, ct.r_curv_throat, ar, M, Twg)
+                hg = self.bartz_factor * bartz_h_g(
+                    gas, Pc, ct.Dt, ct.r_curv_throat, ar, M, Twg)
                 qq = hg * (T_aw - Twg)
                 Twc = Twg - qq * ch.t_wall / ch.k_wall
                 hc = h_c0
@@ -241,7 +309,8 @@ class RegenCoolingModel:
                 # no sign change: wall essentially at coolant/adiabatic limit
                 Twg = st.T + 1.0 if residual(st.T + 1.0) < 0 else T_hi
 
-            hg = bartz_h_g(gas, Pc, ct.Dt, ct.r_curv_throat, ar, M, Twg)
+            hg = self.bartz_factor * bartz_h_g(
+                gas, Pc, ct.Dt, ct.r_curv_throat, ar, M, Twg)
             qi = hg * (T_aw - Twg)
             Twc = Twg - qi * ch.t_wall / ch.k_wall
 
@@ -270,11 +339,12 @@ class RegenCoolingModel:
         dA = 2.0 * np.pi * ct.r * np.gradient(x)
         return RegenResult(
             x=x, r=ct.r.copy(), q=q, T_wg=T_wg, T_wc=T_wc,
-            T_aw=self._T_aw.copy(), h_g=h_g_arr, h_c=h_c_arr,
+            T_aw=T_aw_arr.copy(), h_g=h_g_arr, h_c=h_c_arr,
             T_coolant=T_co, P_coolant=P_co, velocity=vel, mach=self._mach.copy(),
             Q_total=float(np.sum(q * dA)),
             dP_total=float(P_inlet - P),
             coolant_inlet=inlet_state, coolant_outlet=outlet_state,
             boiling_detected=boiling or outlet_state.two_phase,
             pressure_collapsed=collapsed,
+            film_effectiveness=None if eta is None else eta,
         )

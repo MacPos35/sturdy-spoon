@@ -140,6 +140,8 @@ def optimize_channels(
     seed: int = 1,
     baseline: CoolingChannels | None = None,
     min_land: float | None = None,
+    film=None,                    # optional regen_model.FilmCooling credit
+    bartz_factor: float = 1.0,    # Bartz calibration (see RegenCoolingModel)
 ) -> ChannelDesignResult:
     """Find the channel layout minimizing peak wall temperature.
 
@@ -176,7 +178,8 @@ def optimize_channels(
             return 1e6, None, None
         evals[0] += 1
         try:
-            model = RegenCoolingModel(contour, ch, gas, coolant)
+            model = RegenCoolingModel(contour, ch, gas, coolant,
+                                      film=film, bartz_factor=bartz_factor)
             res = model.solve(Pc, mdot_coolant, T_inlet, P_inlet)
         except Exception:
             return 1e6, ch, None
@@ -222,8 +225,10 @@ def optimize_channels(
     base_metrics = None
     if baseline is not None:
         try:
-            bres = RegenCoolingModel(contour, baseline, gas, coolant).solve(
-                Pc, mdot_coolant, T_inlet, P_inlet)
+            bres = RegenCoolingModel(
+                contour, baseline, gas, coolant,
+                film=film, bartz_factor=bartz_factor,
+            ).solve(Pc, mdot_coolant, T_inlet, P_inlet)
             base_metrics = {"peak": bres.peak_wall_temperature,
                             "dp": bres.dP_total}
         except Exception:

@@ -161,3 +161,31 @@ def test_example_spec_parses():
     # string-valued fields must survive the numeric-coercion pass
     assert spec.nozzle_type == "bell"
     assert isinstance(spec.bell_percent, float)
+
+
+# ------------------------------------------------- kerolox quality guards
+
+def test_kerolox_design_with_film_credit_passes_coking():
+    """TKL-5-class kerolox: with the film credit + calibrated Bartz the
+    coking guard passes; the ledger carries the coking item."""
+    spec = EngineSpec(thrust=5e3, propellants="lox/rp1",
+                      chamber_pressure=20e5, credit_film=True,
+                      bartz_factor=0.8, film_fraction=0.15, name="kero")
+    d = design_engine(spec, **FAST)
+    coking = [i for i in d.ledger if "coking" in i.name]
+    assert len(coking) == 1 and coking[0].ok
+    assert all(i.ok for i in d.ledger)
+    assert float(d.channel_design.result.T_wc.max()) <= 590.0
+
+
+def test_kerolox_without_film_credit_fails_loudly():
+    """Same engine without the film credit cannot hold the wall: the
+    pipeline must raise (coking or wall temperature), never silently pass."""
+    spec = EngineSpec(thrust=5e3, propellants="lox/rp1",
+                      chamber_pressure=20e5, name="kero-nofilm")
+    with pytest.raises(DesignError):
+        design_engine(spec, **FAST)
+
+
+def test_methalox_has_no_coking_item(demo):
+    assert not any("coking" in i.name for i in demo.ledger)

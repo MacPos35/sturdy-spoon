@@ -147,3 +147,53 @@ def test_pressure_collapse_flagged(small_engine):
     assert res.pressure_collapsed
     ok = model.solve(Pc, mdot, 110.0, 60e5)
     assert not ok.pressure_collapsed
+
+
+# ------------------------------------------------- film credit + calibration
+
+def _fresh_model(film=None, bartz_factor=1.0):
+    gas = gas_preset("lox/ch4")
+    ct = ChamberContour(0.013, contraction_ratio=8.0, expansion_ratio=4.5,
+                        chamber_length=0.10, n_points=120)
+    ch = CoolingChannels(n_channels=42, channel_width=1.2e-3,
+                         channel_height=1.8e-3, t_wall=0.8e-3, k_wall=330.0)
+    model = RegenCoolingModel(ct, ch, gas, Fluid("Methane"),
+                              film=film, bartz_factor=bartz_factor)
+    Pc = 20e5
+    mdot_f = Pc * ct.At / gas.c_star / 4.4
+    return model, Pc, mdot_f
+
+
+def test_film_credit_lowers_wall_temperature():
+    from cryosim.regen_model import FilmCooling
+    m0, Pc, mdot = _fresh_model()
+    base = m0.solve(Pc, mdot, 110.0, 60e5)
+    film = FilmCooling(mdot=0.10 * mdot, T_inject=600.0, cp=3000.0)
+    m1, _, _ = _fresh_model(film=film)
+    cooled = m1.solve(Pc, mdot, 110.0, 60e5)
+    assert cooled.peak_wall_temperature < base.peak_wall_temperature
+    assert cooled.Q_total < base.Q_total
+    # effectiveness: 1 at the face, monotone non-increasing downstream
+    eta = cooled.film_effectiveness
+    assert eta is not None and eta[0] == pytest.approx(1.0, abs=1e-12)
+    assert np.all(np.diff(eta) <= 1e-12)
+    # more film -> more protection
+    m2, _, _ = _fresh_model(film=FilmCooling(0.25 * mdot, 600.0, 3000.0))
+    more = m2.solve(Pc, mdot, 110.0, 60e5)
+    assert more.peak_wall_temperature < cooled.peak_wall_temperature
+
+
+def test_no_film_means_no_effectiveness_array():
+    m0, Pc, mdot = _fresh_model()
+    assert m0.solve(Pc, mdot, 110.0, 60e5).film_effectiveness is None
+
+
+def test_bartz_factor_scales_heat_load():
+    m0, Pc, mdot = _fresh_model()
+    base = m0.solve(Pc, mdot, 110.0, 60e5)
+    m1, _, _ = _fresh_model(bartz_factor=0.8)
+    calib = m1.solve(Pc, mdot, 110.0, 60e5)
+    assert calib.peak_wall_temperature < base.peak_wall_temperature
+    assert calib.Q_total < base.Q_total
+    # the factor multiplies h_g directly at fixed wall state
+    assert np.all(calib.h_g < base.h_g)

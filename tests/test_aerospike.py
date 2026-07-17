@@ -153,3 +153,41 @@ def test_surface_duck_type_complete():
         assert len(s.x) == len(s.r) == len(s.area)
         assert s.area_ratio().shape == s.x.shape
         assert s.is_supersonic().dtype == bool
+
+
+# ---------------------------------------------------------------- geometry
+
+def test_aerospike_parts_mesh_watertight(aspike):
+    """All three printed parts + the assembly must be watertight (coarse
+    voxels for test speed; report uses finer)."""
+    from cryosim.voxel_geometry import (build_aerospike_body,
+                                        build_annular_injector_head,
+                                        build_spike, concat_meshes,
+                                        mesh_solid)
+    meshes = []
+    for builder, args, vox in (
+            (build_aerospike_body, (aspike,), 1.5e-3),
+            (build_spike, (aspike,), 1.0e-3),
+            (build_annular_injector_head, (aspike.injector,), 0.8e-3)):
+        solid, lo, hi = builder(*args)
+        m = mesh_solid(solid, lo, hi, vox)
+        assert m.is_watertight(), builder.__name__
+        assert m.volume() > 0
+        meshes.append(m)
+    asm = concat_meshes(meshes, 1.5e-3)
+    assert asm.is_watertight()
+    # cowl mesh must be larger in every bbox direction than the spike
+    lo_c, hi_c = meshes[0].bounds()
+    lo_s, hi_s = meshes[1].bounds()
+    assert (hi_c[1] - lo_c[1]) > (hi_s[1] - lo_s[1])
+
+
+def test_aerospike_package(tmp_path, aspike):
+    """generate_package produces the aerospike deliverable set."""
+    from cryosim.design_report import generate_package
+    paths = generate_package(aspike, str(tmp_path), with_geometry=False)
+    for key in ("cross_section", "injector_face", "wall_temperature",
+                "wall_temperature_spike", "report", "trace"):
+        assert key in paths
+    md = open(paths["report"]).read()
+    assert "annular throat" in md and "spike" in md

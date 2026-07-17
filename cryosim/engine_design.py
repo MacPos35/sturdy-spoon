@@ -1004,10 +1004,16 @@ def _design_aerospike(spec: EngineSpec, n_random: int, n_polish: int,
             f"fuel {P_inlet/1e5:.0f} bar (cowl circuit), LOX "
             f"{P_ox_inlet/1e5:.0f} bar (spike circuit); jacket budget "
             f"{dp_budget/1e5:.0f} bar each")
-        bounds = {
-            "channel_width": (proc["min_channel_width"], 3.0e-3),
-            "t_wall": (proc["min_wall"], 1.5e-3),
-        }
+        def circuit_bounds(surf):
+            """Channel-count bounds that actually fit the wall's tightest
+            radius (the spike base can be small on kN-class engines)."""
+            n_hi = int(2.0 * np.pi * surf.Rt
+                       / (proc["min_land"] + proc["min_channel_width"]))
+            return {
+                "channel_width": (proc["min_channel_width"], 3.0e-3),
+                "t_wall": (proc["min_wall"], 1.5e-3),
+                "n_channels": (8, max(12, min(220, n_hi))),
+            }
         film = None
         if spec.credit_film and spec.film_fraction > 0:
             T_film = 600.0
@@ -1029,13 +1035,15 @@ def _design_aerospike(spec: EngineSpec, n_random: int, n_polish: int,
 
         cowl_cd = optimize_channels(
             chamber.cowl, gas, coolant, Pc, mdot_fuel, T_cool_in, P_inlet,
-            dp_budget=dp_budget, k_wall=liner["k_wall"], bounds=bounds,
+            dp_budget=dp_budget, k_wall=liner["k_wall"],
+            bounds=circuit_bounds(chamber.cowl),
             n_random=n_random, n_polish=n_polish,
             min_land=proc["min_land"],
             film=film, bartz_factor=spec.bartz_factor)
         spike_cd = optimize_channels(
             chamber.inner, gas, oxidizer, Pc, mdot_ox, T_ox_in, P_ox_inlet,
-            dp_budget=dp_budget, k_wall=liner["k_wall"], bounds=bounds,
+            dp_budget=dp_budget, k_wall=liner["k_wall"],
+            bounds=circuit_bounds(chamber.inner),
             n_random=n_random, n_polish=n_polish,
             min_land=proc["min_land"],
             bartz_factor=spec.bartz_factor)

@@ -466,6 +466,51 @@ def mesh_qa(mesh: TriMesh, name: str, rho: float | None = None) -> MeshQA:
 # Engine part builders (implicit models from cryosim design objects)
 # ----------------------------------------------------------------------
 
+def _attach_torus_manifold(solid, m, x_c: float, r_band: float,
+                           channel_height: float, blend: float):
+    """Blend one torus manifold (+ feeder stubs) onto ``solid``.
+
+    ``m`` is a manifold spec (duct_diameter, r_centerline, wall_thickness,
+    n_feeders); ``x_c`` the torus plane; ``r_band`` the channel-band radius
+    the distribution slot must reach. Returns ``(solid, r_reach, x_lo,
+    x_hi)`` with the extents the torus + stubs add.
+    """
+    duct_r = m.duct_diameter / 2.0
+    R_T = m.r_centerline               # torus centerline clear of jacket
+    wall = m.wall_thickness
+    body = TorusX(x_c, R_T, duct_r + wall)
+    cavity = TorusX(x_c, R_T, duct_r)
+    # distribution slot: annular ring connecting the channel band
+    # to the torus cavity over one channel height of axial extent
+    slot_h = min(channel_height, 2.0 * duct_r)
+    slot = RevolvedAnnulus(
+        np.array([x_c - slot_h / 2.0, x_c + slot_h / 2.0]),
+        np.array([r_band, r_band]),
+        np.array([R_T, R_T]))
+    # feeder stubs: radial bores + bosses on the torus
+    stub_len = 3.0 * duct_r
+    feeders_body = []
+    feeders_bore = []
+    for k in range(m.n_feeders):
+        ang = 2.0 * np.pi * k / m.n_feeders
+        p0 = (x_c, R_T * np.cos(ang), R_T * np.sin(ang))
+        p1 = (x_c, (R_T + stub_len) * np.cos(ang),
+              (R_T + stub_len) * np.sin(ang))
+        feeders_body.append(Cylinder(p0, p1, duct_r * 0.8 + wall))
+        feeders_bore.append(Cylinder(p0, p1, duct_r * 0.8))
+        # flared inlet flange: a rounded boss at the stub tip
+        feeders_body.append(Sphere(p1, duct_r + 1.5 * wall))
+    # organic attach: fillet the feeders onto the torus and the torus
+    # onto the shell (smooth-union), instead of hard-creased booleans
+    manifold = smooth_union([body] + feeders_body, blend) \
+        if blend > 0 else union([body] + feeders_body)
+    solid = (SmoothUnion(solid, manifold, blend) if blend > 0
+             else solid | manifold)
+    solid = solid - cavity - slot - union(feeders_bore)
+    return (solid, R_T + duct_r + wall + stub_len,
+            x_c - duct_r - wall, x_c + duct_r + wall)
+
+
 def build_chamber_jacket(contour, channels, t_closeout: float,
                          manifolds=None, blend: float = 3.0e-3,
                          features: bool = True, n_instrument_ports: int = 4,
@@ -495,43 +540,12 @@ def build_chamber_jacket(contour, channels, t_closeout: float,
 
     if manifolds is not None:
         for m, x_c in ((manifolds.inlet, x[-1]), (manifolds.outlet, x[0])):
-            duct_r = m.duct_diameter / 2.0
-            R_T = m.r_centerline           # torus centerline clear of jacket
-            wall = m.wall_thickness
-            body = TorusX(x_c, R_T, duct_r + wall)
-            cavity = TorusX(x_c, R_T, duct_r)
-            # distribution slot: annular ring connecting the channel band
-            # to the torus cavity over one channel height of axial extent
-            slot_h = min(channels.channel_height,
-                         2.0 * duct_r)
-            r_band = np.interp(x_c, x, r_hot)
-            slot = RevolvedAnnulus(
-                np.array([x_c - slot_h / 2.0, x_c + slot_h / 2.0]),
-                np.array([r_band, r_band]),
-                np.array([R_T, R_T]))
-            # feeder stubs: radial bores + bosses on the torus
-            stub_len = 3.0 * duct_r
-            feeders_body = []
-            feeders_bore = []
-            for k in range(m.n_feeders):
-                ang = 2.0 * np.pi * k / m.n_feeders
-                p0 = (x_c, R_T * np.cos(ang), R_T * np.sin(ang))
-                p1 = (x_c, (R_T + stub_len) * np.cos(ang),
-                      (R_T + stub_len) * np.sin(ang))
-                feeders_body.append(Cylinder(p0, p1, duct_r * 0.8 + wall))
-                feeders_bore.append(Cylinder(p0, p1, duct_r * 0.8))
-                # flared inlet flange: a rounded boss at the stub tip
-                feeders_body.append(Sphere(p1, duct_r + 1.5 * wall))
-            # organic attach: fillet the feeders onto the torus and the torus
-            # onto the shell (smooth-union), instead of hard-creased booleans
-            manifold = smooth_union([body] + feeders_body, blend) \
-                if blend > 0 else union([body] + feeders_body)
-            solid = (SmoothUnion(solid, manifold, blend) if blend > 0
-                     else solid | manifold)
-            solid = solid - cavity - slot - union(feeders_bore)
-            r_max = max(r_max, R_T + duct_r + wall + stub_len)
-            x_lo = min(x_lo, x_c - duct_r - wall)
-            x_hi = max(x_hi, x_c + duct_r + wall)
+            r_band = float(np.interp(x_c, x, r_hot))
+            solid, r_reach, xl, xh = _attach_torus_manifold(
+                solid, m, x_c, r_band, channels.channel_height, blend)
+            r_max = max(r_max, r_reach)
+            x_lo = min(x_lo, xl)
+            x_hi = max(x_hi, xh)
 
     if features:
         solid, r_feat, x_lo2, x_hi2 = _add_functional_features(
@@ -672,3 +686,184 @@ def build_injector_head(inj, plate_thickness: float | None = None,
         cuts.append(RingHolesX(-H, 0.0, f.ring_radius, f.n_holes, f.d_hole))
     solid = body - union(cuts)
     return solid, (x_back, -R_body, -R_body), (0.0, R_body, R_body)
+
+
+# ----------------------------------------------------------------------
+# Aerospike part builders
+# ----------------------------------------------------------------------
+
+def build_aerospike_body(design, blend: float = 3.0e-3,
+                         features: bool = True,
+                         n_instrument_ports: int = 4,
+                         n_feet: int = 3) -> tuple[Solid, tuple, tuple]:
+    """Cowl/chamber outer jacket of an aerospike engine (fuel circuit).
+
+    Same construction as :func:`build_chamber_jacket` on the cowl surface:
+    revolved wall shell minus helical channels, torus manifolds at the
+    injector face (outlet) and cowl lip (inlet), instrumentation bosses and
+    mounting feet. The part spans x >= 0 (the injector ring sits behind
+    the face plane, as in the bell package).
+    """
+    a = design.aerospike
+    ch = design.channel_design.channels
+    surf = a.cowl
+    x, r = surf.x, surf.r
+    r_hot = r + ch.t_wall
+    r_out = r_hot + ch.channel_height + design.t_closeout
+    shell = RevolvedAnnulus(x, r, r_out)
+    void = HelicalChannels(x, r_hot, ch.n_channels, ch.channel_width,
+                           ch.channel_height, ch.helix_angle_deg)
+    solid = shell - void
+    r_max = float(r_out.max())
+    x_lo, x_hi = float(x[0]), float(x[-1])
+
+    if design.manifolds is not None:
+        for m, x_c in ((design.manifolds.inlet, x[-1]),
+                       (design.manifolds.outlet, x[0])):
+            r_band = float(np.interp(x_c, x, r_hot))
+            solid, r_reach, xl, xh = _attach_torus_manifold(
+                solid, m, x_c, r_band, ch.channel_height, blend)
+            r_max = max(r_max, r_reach)
+            x_lo = min(x_lo, xl)
+            x_hi = max(x_hi, xh)
+
+    if features:
+        solid, r_feat, x_lo2, x_hi2 = _add_functional_features(
+            solid, surf, ch, design.t_closeout, blend,
+            n_instrument_ports, n_feet)
+        r_max = max(r_max, r_feat)
+        x_lo, x_hi = min(x_lo, x_lo2), max(x_hi, x_hi2)
+
+    b = r_max
+    return solid, (x_lo, -b, -b), (x_hi, b, b)
+
+
+def build_spike(design, blend: float = 2.0e-3) -> tuple[Solid, tuple, tuple]:
+    """Center spike with its internal LOX cooling circuit (x >= 0).
+
+    Solid of revolution over the inner-wall + spike profile, minus: the
+    wall cooling channels just below the hot surface, a base distribution
+    torus fed by a central axial supply gallery from the injector plane
+    (oxygen enters through the spike, LEAP 71-style), and a shoulder
+    collector torus that returns the heated oxygen to the face through a
+    ring of axial ports. Representative plumbing for the printable
+    model, not a flow-balanced design (house convention).
+    """
+    a = design.aerospike
+    scd = design.spike_channel_design
+    sch = scd.channels
+    surf = a.inner
+    x, r = surf.x, surf.r
+    body = RevolvedAnnulus(x, np.zeros_like(r), r)
+    # channels lie just below the hot wall; keep the floor off the axis
+    r_floor = np.maximum(r - sch.t_wall - sch.channel_height, 1.5e-3)
+    void = HelicalChannels(x, r_floor, sch.n_channels, sch.channel_width,
+                           sch.channel_height, sch.helix_angle_deg)
+    solid = body - void
+
+    msys = design.spike_manifolds
+    duct_in = (msys.inlet.duct_diameter / 2.0 if msys is not None
+               else 3.0e-3)
+    duct_out = (msys.outlet.duct_diameter / 2.0 if msys is not None
+                else 3.0e-3)
+
+    # base distribution torus (coolant enters at the aft end - counterflow)
+    x_b = float(x[-1]) - max(2.5 * duct_in, 4.0e-3)
+    R_Tb = max(float(np.interp(x_b, x, r_floor)) - duct_in - 1.5e-3, 2.5e-3)
+    slot_h = min(sch.channel_height, 2.0 * duct_in)
+    slot_b = RevolvedAnnulus(
+        np.array([x_b - slot_h / 2.0, x_b + slot_h / 2.0]),
+        np.array([R_Tb, R_Tb]),
+        np.array([float(np.interp(x_b, x, r_floor)) + 1e-4] * 2))
+    solid = solid - TorusX(x_b, R_Tb, duct_in) - slot_b
+
+    # central supply gallery from the face plane to the base torus, joined
+    # by a thin radial disc cavity at the torus plane
+    r_gal = max(0.35 * R_Tb, 2.0e-3)
+    sg = min(2.0 * duct_in, 6.0e-3)
+    solid = solid - CylinderX(-1e-4, x_b, r_gal)
+    solid = solid - RevolvedAnnulus(
+        np.array([x_b - sg / 2.0, x_b + sg / 2.0]),
+        np.array([0.0, 0.0]), np.array([R_Tb, R_Tb]))
+
+    # shoulder collector torus + axial return ports through the face
+    x_t = max(2.5 * duct_out, 4.0e-3)
+    R_Tt = max(float(np.interp(x_t, x, r_floor)) - duct_out - 1.5e-3,
+               r_gal + duct_out + 1.5e-3)
+    slot_t = RevolvedAnnulus(
+        np.array([x_t - slot_h / 2.0, x_t + slot_h / 2.0]),
+        np.array([R_Tt, R_Tt]),
+        np.array([float(np.interp(x_t, x, r_floor)) + 1e-4] * 2))
+    n_ret = (msys.outlet.n_feeders if msys is not None else 2) * 4
+    ports = RingHolesX(-1e-4, x_t, R_Tt, max(n_ret, 4),
+                       min(2.0 * duct_out, 6.0e-3))
+    solid = solid - TorusX(x_t, R_Tt, duct_out) - slot_t - ports
+
+    r_max = float(r.max())
+    return solid, (float(x[0]), -r_max, -r_max), (float(x[-1]), r_max, r_max)
+
+
+def build_annular_injector_head(inj, plate_thickness: float | None = None,
+                                blend: float = 2.5e-3
+                                ) -> tuple[Solid, tuple, tuple]:
+    """Annular coax-swirl injector ring for the aerospike (x in [-H, 0]).
+
+    The ring body spans the annular chamber face; the propellant side is
+    closed by a rounded toroidal back (the organic form of the disc
+    head's dome). Per element: vortex bore, exit nozzle, fuel annulus and
+    tangential LOX ports - identical cuts to :func:`build_injector_head`,
+    which the element rings already place on the annulus.
+    """
+    e = inj.element
+    a = inj.annulus
+    t_face = plate_thickness or max(3.0e-3, 2.0 * a.gap)
+    L_noz = e.L_nozzle + t_face
+    H = e.L_vortex + L_noz + 2.0 * t_face
+    r_out_body = inj.face_radius + 4.0e-3
+    r_in_body = max(inj.face_r_inner - 4.0e-3, 2.0e-3)
+    ring = RevolvedAnnulus(np.array([-H, 0.0]),
+                           np.array([r_in_body] * 2),
+                           np.array([r_out_body] * 2))
+    R_mid = 0.5 * (r_in_body + r_out_body)
+    r_tube = 0.5 * (r_out_body - r_in_body)
+    back = TorusX(-H, R_mid, r_tube)
+    body = SmoothUnion(ring, back, blend) if blend > 0 else (ring | back)
+    x_back = -H - r_tube
+
+    cuts: list[Solid] = []
+    x_vc0 = -L_noz - e.L_vortex
+    for r_ring, n_on_ring in inj.rings:
+        for k in range(n_on_ring):
+            ang = 2.0 * np.pi * k / max(n_on_ring, 1)
+            cy, cz = r_ring * np.cos(ang), r_ring * np.sin(ang)
+            cuts.append(CylinderX(-L_noz, 0.0, e.r_nozzle, cy, cz))
+            cuts.append(CylinderX(x_vc0, -L_noz, e.r_vortex, cy, cz))
+            ann_depth = a.recess + t_face
+            cuts.append(CylinderX(-ann_depth, 0.0, a.r_outer, cy, cz)
+                        - CylinderX(-ann_depth - 1.0, 1.0, a.r_inner,
+                                    cy, cz))
+            for j in range(e.n_tangential):
+                pang = ang + 2.0 * np.pi * j / e.n_tangential
+                tx = x_vc0 + e.r_vortex
+                ey = cy + e.R_swirl_arm * np.cos(pang)
+                ez = cz + e.R_swirl_arm * np.sin(pang)
+                dy, dz = -np.sin(pang), np.cos(pang)
+                L_port = 2.5 * e.r_vortex
+                cuts.append(Cylinder(
+                    (tx, ey - dy * L_port / 2, ez - dz * L_port / 2),
+                    (tx, ey + dy * L_port / 2, ez + dz * L_port / 2),
+                    e.r_tangential))
+    # ox plenum: annular groove behind the vortex chambers
+    ring_rs = [rr for rr, _ in inj.rings]
+    r_pl_in = max(r_in_body + t_face, min(ring_rs) - e.r_vortex)
+    r_pl_out = min(r_out_body - t_face, max(ring_rs) + e.r_vortex)
+    if r_pl_out > r_pl_in:
+        cuts.append(RevolvedAnnulus(
+            np.array([x_back + t_face, x_vc0]),
+            np.array([r_pl_in] * 2), np.array([r_pl_out] * 2)))
+    if inj.film is not None:
+        f = inj.film
+        cuts.append(RingHolesX(-H, 0.0, f.ring_radius, f.n_holes, f.d_hole))
+    solid = body - union(cuts)
+    return (solid, (x_back, -r_out_body, -r_out_body),
+            (0.0, r_out_body, r_out_body))

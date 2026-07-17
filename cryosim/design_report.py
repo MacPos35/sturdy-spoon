@@ -85,12 +85,75 @@ def draw_cross_section(design: EngineDesign, path: str) -> None:
     plt.close(fig)
 
 
+def draw_aerospike_cross_section(design: EngineDesign, path: str) -> None:
+    """Meridional section of the aerospike: cowl, spike, both circuits."""
+    a = design.aerospike
+    ch = design.channel_design.channels
+    sch = design.spike_channel_design.channels
+    man = design.manifolds
+
+    fig, ax = plt.subplots(figsize=(9, 6), layout="tight")
+    xc_, rc_ = a.cowl.x * 1e3, a.cowl.r * 1e3
+    t_w, h = ch.t_wall * 1e3, ch.channel_height * 1e3
+    t_c = design.t_closeout * 1e3
+    xs_, rs_ = a.inner.x * 1e3, a.inner.r * 1e3
+    st_w, sh = sch.t_wall * 1e3, sch.channel_height * 1e3
+    for sgn in (+1, -1):
+        # cowl stack (liner, channels, closeout) grows outward
+        ax.fill_between(xc_, sgn * rc_, sgn * (rc_ + t_w),
+                        color="#b87333",
+                        label="liner (hot wall)" if sgn > 0 else None)
+        ax.fill_between(xc_, sgn * (rc_ + t_w), sgn * (rc_ + t_w + h),
+                        color="#9ecae1",
+                        label="cooling channels" if sgn > 0 else None)
+        ax.fill_between(xc_, sgn * (rc_ + t_w + h),
+                        sgn * (rc_ + t_w + h + t_c), color="#969696",
+                        label="closeout" if sgn > 0 else None)
+        # spike: solid body with the LOX channel band under the surface
+        ax.fill_between(xs_, sgn * np.maximum(rs_ - st_w - sh, 0.0),
+                        sgn * rs_, color="#9ecae1")
+        ax.fill_between(xs_, 0.0 * rs_,
+                        sgn * np.maximum(rs_ - st_w - sh, 0.0),
+                        color="#c9a227",
+                        label="spike (LOX-cooled)" if sgn > 0 else None)
+    for m, xc in ((man.inlet, xc_[-1]), (man.outlet, xc_[0])):
+        R = m.r_centerline * 1e3
+        d = m.duct_diameter * 1e3
+        tw = m.wall_thickness * 1e3
+        for sgn in (+1, -1):
+            ax.add_patch(plt.Circle((xc, sgn * R), d / 2 + tw,
+                                    color="#969696"))
+            ax.add_patch(plt.Circle((xc, sgn * R), d / 2, color="white"))
+    e = design.injector.element
+    H = (e.L_vortex + e.L_nozzle) * 1e3 + 10.0
+    r_o = design.injector.face_radius * 1e3
+    r_i = design.injector.face_r_inner * 1e3
+    for sgn in (+1, -1):
+        ax.fill_between([-H, 0], sgn * (r_i - 4), sgn * (r_o + 4),
+                        color="#d9d9d9",
+                        label="injector ring (envelope)" if sgn > 0
+                        else None)
+    ax.axvline(a.cowl.x_throat * 1e3, ls=":", c="k", lw=0.8)
+    ax.set_xlabel("x from injector face [mm]")
+    ax.set_ylabel("r [mm]")
+    ax.set_title(f"'{design.spec.name}' aerospike meridional section — "
+                 f"{design.spec.thrust/1e3:.1f} kN "
+                 f"{design.spec.propellants}")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.set_aspect("equal")
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
+
 def draw_injector_face(design: EngineDesign, path: str) -> None:
     inj = design.injector
     e, a = inj.element, inj.annulus
     fig, ax = plt.subplots(figsize=(6, 6), layout="tight")
     ax.add_patch(plt.Circle((0, 0), inj.face_radius * 1e3, fill=False,
                             color="k", lw=1.2))
+    if inj.face_r_inner > 0:
+        ax.add_patch(plt.Circle((0, 0), inj.face_r_inner * 1e3, fill=False,
+                                color="k", lw=1.2))
     for r_ring, n_on in inj.rings:
         for k in range(n_on):
             ang = 2 * np.pi * k / max(n_on, 1)
@@ -140,23 +203,66 @@ def generate_package(design: EngineDesign, outdir: str,
         if verbose:
             print(f"  {msg}")
 
+    is_spike = design.aerospike is not None
+
     # ---- figures ---------------------------------------------------------
     p = os.path.join(outdir, "cross_section.png")
-    draw_cross_section(design, p)
+    if is_spike:
+        draw_aerospike_cross_section(design, p)
+    else:
+        draw_cross_section(design, p)
     paths["cross_section"] = p
     p = os.path.join(outdir, "injector_face.png")
     draw_injector_face(design, p)
     paths["injector_face"] = p
     p = os.path.join(outdir, "wall_temperature.png")
     cd = design.channel_design
-    x_throat = design.contour.x[np.argmin(design.contour.r)]
+    x_throat = design.contour.x[design.contour.i_throat] if is_spike \
+        else design.contour.x[np.argmin(design.contour.r)]
     plot_regen_distribution(cd.result, x_throat, p,
-                            title=f"'{design.spec.name}' regen solution")
+                            title=f"'{design.spec.name}' regen solution"
+                            + (" (cowl, fuel)" if is_spike else ""))
     paths["wall_temperature"] = p
+    if is_spike:
+        p = os.path.join(outdir, "wall_temperature_spike.png")
+        plot_regen_distribution(
+            design.spike_channel_design.result, x_throat, p,
+            title=f"'{design.spec.name}' regen solution (spike, LOX)")
+        paths["wall_temperature_spike"] = p
     say("figures written")
 
     # ---- geometry ----------------------------------------------------------
-    if with_geometry:
+    if with_geometry and is_spike:
+        from .voxel_geometry import (build_aerospike_body,
+                                     build_annular_injector_head,
+                                     build_spike)
+        liner_rho = LINER_MATERIALS[design.spec.liner]["rho"]
+        parts = []
+        for name, builder, args, rho in (
+                ("aerospike_cowl", build_aerospike_body, (design,),
+                 liner_rho),
+                ("aerospike_spike", build_spike, (design,), liner_rho),
+                ("injector_ring", build_annular_injector_head,
+                 (design.injector,), PART_DENSITY["injector_head"])):
+            vox = voxel_injector_mm if name == "injector_ring" \
+                else voxel_jacket_mm
+            say(f"meshing {name} at {vox} mm voxels ...")
+            solid, lo, hi = builder(*args)
+            mesh = mesh_solid(solid, lo, hi, vox * 1e-3)
+            p = os.path.join(outdir, f"{name}.stl")
+            mesh.save_stl(p, f"cryosim {name}".encode())
+            paths[name] = p
+            qa.append(mesh_qa(mesh, f"{name}.stl", rho=rho))
+            say(qa[-1].describe())
+            parts.append(mesh)
+        say("assembling multi-shell engine ...")
+        asm = concat_meshes(parts, voxel_jacket_mm * 1e-3)
+        p = os.path.join(outdir, "engine_assembly.stl")
+        asm.save_stl(p, b"cryosim engine assembly")
+        paths["engine_assembly"] = p
+        qa.append(mesh_qa(asm, "engine_assembly.stl", rho=None))
+        say(qa[-1].describe())
+    elif with_geometry:
         liner_rho = LINER_MATERIALS[design.spec.liner]["rho"]
         say(f"meshing chamber jacket at {voxel_jacket_mm} mm voxels ...")
         solid, lo, hi = build_chamber_jacket(
@@ -332,6 +438,11 @@ def render_report(design: EngineDesign, qa: list[MeshQA],
         "",
         "![wall temperature](wall_temperature.png)",
         "",
+    ]
+    if design.aerospike is not None:
+        lines += ["![spike wall temperature](wall_temperature_spike.png)",
+                  ""]
+    lines += [
         "## Design trace",
         "",
         f"{len(design.trace.entries)} decisions recorded — see "

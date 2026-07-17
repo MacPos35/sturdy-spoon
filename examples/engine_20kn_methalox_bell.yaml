@@ -1,0 +1,24 @@
+# RDD-class 20 kN methalox bell — one of the two orbital-class engines
+# LEAP 71 hot-fired in December 2025 (CuCrZr, printed in one piece by
+# Aconity3D; ~2 t of thrust on cryogenic LOX/CH4). Chamber pressure and
+# Isp were not published; this spec reproduces the published
+# requirements at the feasibility point the sibling aerospike can also
+# carry, so the two engines share requirements and physics — the same
+# one-model-two-engines demonstration LEAP 71 made.
+#
+#   cryosim design examples/engine_20kn_methalox_bell.yaml -o output/bell20
+
+name: rdd-class-20kN-methalox-bell
+thrust: 2.0e4                 # N, sea level (~2 t)
+propellants: lox/ch4
+chamber_pressure: 3.0e6       # Pa (30 bar) — unpublished; see above
+ambient_pressure: 101325.0
+
+liner: cucrzr
+closeout_material: 316L
+process: lpbf
+nozzle_type: bell
+
+credit_film: true             # film ring credited thermally (conservative)
+bartz_factor: 0.8             # documented LOX/CH4 Bartz calibration (ODREC
+                              # 2024: Bartz over-predicts flux ~20-30%)

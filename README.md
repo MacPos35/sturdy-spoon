@@ -79,6 +79,19 @@ and three design-study tools are included:
   (`cryosim/voxel_geometry.py`: signed-distance solids → marching cubes →
   closed meshes with per-part watertightness/volume/mass QA), a
   cross-section drawing, the regen solution, and a performance report.
+  The pipeline covers **LEAP 71's public engine lineup**: kerolox (RP-1 as
+  the CEA CH1.9423 surrogate, with a coolant-side **coking guard**),
+  methalox bells, and a full **aerospike** (`nozzle_type: aerospike`) —
+  Angelino spike contour, toroidal chamber, fuel-cooled cowl + LOX-cooled
+  spike, annular injector, and its own printable part set. The film ring
+  can be **credited thermally** (`credit_film`, Hatch–Papell effectiveness,
+  conservative), Bartz carries a documented calibration knob
+  (`bartz_factor`), and every converged design is closed out by an
+  **independent verification pass** (thrust closure, regen re-march, Euler
+  CFD mass-flow check on the actual contour) before it is returned — the
+  generate→verify pattern. See
+  [docs/results/leap71_parity.md](docs/results/leap71_parity.md) for the
+  three reference engines designed to LEAP 71's published requirements.
 
 * **`cryosim optimize`** — max-performance cooling-channel search
   (channel count/width/height/wall thickness) minimizing peak wall
@@ -329,10 +342,12 @@ that first tier:
 
 | Sub-model | Industry-standard method | cryosim | Standing |
 |---|---|---|---|
-| Combustion | NASA CEA — Gibbs-min equilibrium, shifting/frozen | 10-species Gibbs-min + shifting expansion + soot-onset | **Same method**, within ~2–3% of CEA; condensed-carbon boundary flagged (not resolved) |
+| Combustion | NASA CEA — Gibbs-min equilibrium, shifting/frozen | 10-species Gibbs-min + shifting expansion + soot-onset (CH4/H2/EtOH/propane/**RP-1** surrogate) | **Same method**, within ~2–3% of CEA; condensed-carbon boundary flagged (not resolved) |
 | Nozzle contour | Rao parabola (prelim); **method of characteristics (final)** | Rao parabola **or MOC** (`nozzle_type: moc`, λ≈1) | **Both tiers** — MOC gives the uniform-axial-exit optimum |
+| Aerospike | Angelino approximate plug contour (prelim); MOC/CFD (final) | Angelino contour + truncation loss w/ closed-wake base pressure (Hagemann 1998) | **Standard preliminary** — the published plug-design method |
 | Nozzle performance | Cf × angularity(λ) × friction efficiencies | identical | **Standard** |
-| Regen cooling | Bartz + Dittus–Boelter 1D (prelim); conjugate CFD (final) | identical | **Standard preliminary** |
+| Regen cooling | Bartz + Dittus–Boelter 1D (prelim); conjugate CFD (final) | identical, + documented `bartz_factor` calibration | **Standard preliminary** |
+| Film cooling | Effectiveness correlations (prelim); multiphase CFD (final) | Hatch–Papell exponential effectiveness (NASA TN D-130), no liquid-run/latent credit | **Standard preliminary**, conservative end |
 | Regen life | Thermal stress + Manson–Coffin LCF (final) | closed-form thermal/pressure stress + Manson–Coffin | **Final-design analytical** (not 3-D FEA) |
 | Injector | Bazarov swirl theory + empirical Cd | identical | **Standard preliminary** |
 | Stability | Acoustic-mode + n–τ screen (final); nonlinear CFD (research) | chamber L/T/R modes + injector-coupling screen | **Final-design screen** (linear, not nonlinear sim) |
@@ -342,12 +357,17 @@ that first tier:
 | AM geometry | Implicit/voxel kernel (PicoGK-class) | small PicoGK-like kernel | **Emerging industry standard** (LEAP 71/nTop lineage) |
 
 So: **the methods are industry-standard, correctly implemented and
-cross-checked** (`cryosim benchmark` puts 28 computed numbers next to
-NIST/CEA/Anderson/textbook references; all within tolerance/band). Four
-subsystems now carry a **final-design-tier** method — a true
+cross-checked** (`cryosim benchmark` puts every computed number next to
+NIST/CEA/Anderson/textbook references; all within tolerance/band — see
+[docs/results/benchmarks.md](docs/results/benchmarks.md)). Four
+subsystems carry a **final-design-tier** method — a true
 method-of-characteristics nozzle, thermal-stress + low-cycle-fatigue life,
 soot-onset (condensed-carbon) prediction, and an acoustic combustion-
-stability screen. What remains deliberately out of scope (needs dedicated
+stability screen — and every converged design closes with the
+**generate→verify pattern**: an independent verification pass (thrust
+closure, regen re-march outside the optimizer, Euler CFD mass flow on the
+actual contour) recorded as `verify:` ledger items in the report.
+What remains deliberately out of scope (needs dedicated
 solvers/compute/validation data) is the *high-fidelity-solver* tier: full
 CEA with all condensed species, RANS/LES CFD, 3-D conjugate heat transfer,
 qualification-grade FEA, and finite-rate kinetics. This tool is faster and
@@ -379,7 +399,9 @@ numbers.
 | Manifold design | Bajura & Jones (1976) header theory; toroidal-shell membrane stress (Roark) | Dividing/combining pressure-profile shapes and symmetry, uniformity improving with duct area and channel stiffness (the literature's area-ratio trend), torus wall → cylinder limit as R/r → ∞ | **Verified vs the classical theory's trends**; k_m = 0.7 is the literature mid-range, not calibrated to a rocket dataset |
 | Injector (swirl theory) | Bazarov/Yang/Puri ch. 2 closed forms; classical `mu(A)`/spray-angle charts | Hand-evaluated relation set, exact maximum-flow round-trip, chart anchor at A = 1 (mu ≈ 0.44, half-angle ≈ 33°), monotonic swirl trends, per-element flow closure | **Implementation-verified vs the ideal theory** — inviscid; real injectors run a few % lower Cd / narrower cone; NOT hot-fire validated, no stability prediction |
 | Nozzle (bell contour) | Rao TOP parabolic-approximation method; angularity efficiency `0.5(1+cosθ)` (Sutton eq. 3-34) | Exit radius = Rt√ε and exit area ratio exact, bell shorter than the 15° cone, θ_exit and λ monotonic in ε, λ(cone)=0.983 exact, bell λ>cone | **Verified vs the parabolic method + angularity model**; θ_n/θ_e are a documented chart *fit*, not MOC — geometry and the ~1% Cf credit are representative, not a point design |
-| Equilibrium combustion | NASA CEA (Gordon & McBride) published points for LOX/CH4, LOX/H2, LOX/ethanol | T_c, c* and shifting Isp within ~2–3% of CEA; element conservation exact; **peak-Isp O/F in the CEA band** (CH4 ~3.2, EtOH ~1.85) via shifting-equilibrium expansion; higher Pc→hotter | **Band-validated vs CEA**. 8-species, no condensed carbon (soot-forming O/F<~1.6 not captured); LOX/H2 optimum a touch rich |
+| Equilibrium combustion | NASA CEA (Gordon & McBride) published points for LOX/CH4, LOX/H2, LOX/ethanol, **LOX/RP-1** | T_c, c* and shifting Isp within ~2–3% of CEA; element conservation exact; **peak-Isp O/F in the CEA band** (CH4 ~3.2, EtOH ~1.85, RP-1 ~2.6) via shifting-equilibrium expansion; kerolox anchor: T_c 3618 K at O/F 2.27 / 68 atm vs CEA ~3670–3700 K | **Band-validated vs CEA**. 8-species, no condensed carbon (soot-forming O/F<~1.6 not captured); LOX/H2 optimum a touch rich |
+| Aerospike | Angelino (AIAA J 2(10), 1964); Hagemann et al. (JPP 14(5), 1998) | Ideal spike closes exactly on the axis at πR_lip²=εA_t; exit Mach honors the area ratio; 30%-spike truncation loss ~1.5% of Cf in the published truncated-plug class band | **Verified vs the published method**; base pressure is closed-wake conservative — the softest number in any reduced-order plug model, stated not hidden |
+| Film-cooling credit | Hatch & Papell (NASA TN D-130, 1959) exponential effectiveness | η=1 at the face decaying with convected heat over film capacity; monotone credit; no liquid-run or latent-heat credit | **Implementation-verified, conservative by construction**; not anchored to a hot-fire film dataset |
 | Design pipeline | Sutton/Huzel & Huang closed-form performance relations | c*/Cf hand checks, thrust closure `F = Cf Pc At` (exact), mass/mixture balance, plausibility bands for the 5 kN demo, exact determinism of two identical runs | **Rule-level verified**; the rules encode kN-class practice — outputs inherit each sub-model's validation status; the printed engine is a *concept*, not a qualified design |
 | Voxel geometry | Analytic volumes (sphere, torus, tube, oblique cylinder, helical channel band) | Volumes within ~2–3 % at test resolution, closed-mesh (edge-pairing) invariant on every part incl. the full jacket and injector head, STL byte-level round-trip | **Verified vs analytic references**; fidelity is voxel-limited (stated per part) |
 

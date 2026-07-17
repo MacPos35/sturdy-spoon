@@ -1,0 +1,24 @@
+# 20 kN methalox aerospike — the second of LEAP 71's December 2025
+# orbital-class pair: a full aerospike (toroidal chamber + truncated
+# central spike), same requirements and physics as the bell, printed in
+# CuCrZr as a single piece. The spike is cooled by routing the cryogenic
+# oxygen through it — the arrangement this pipeline reproduces (fuel
+# cools the cowl, LOX the spike).
+#
+#   cryosim design examples/engine_20kn_methalox_aerospike.yaml \
+#       -o output/aspike20 --voxel-jacket 0.7 --voxel-injector 0.4
+
+name: rdd-class-20kN-methalox-aerospike
+thrust: 2.0e4                 # N, sea level (~2 t)
+propellants: lox/ch4
+chamber_pressure: 3.0e6       # Pa (30 bar) — same point as the bell
+ambient_pressure: 101325.0
+
+liner: cucrzr
+closeout_material: 316L
+process: lpbf
+nozzle_type: aerospike
+spike_length_fraction: 0.30   # stubby truncated spike (of the ideal length)
+
+credit_film: true             # film on the cowl wall (spike gets no film)
+bartz_factor: 0.8             # documented LOX/CH4 Bartz calibration

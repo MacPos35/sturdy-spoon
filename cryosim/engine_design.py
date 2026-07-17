@@ -829,6 +829,23 @@ def design_engine(spec: EngineSpec, n_random: int = 40, n_polish: int = 40,
                        f"{ts.cycle_life:.0f} cycles",
                        f">= {spec.required_cycles} required"),
         ]
+        # ---- repair: a cooler wall derates the yield less and strains
+        # less per cycle; buy wall margin with coolant velocity
+        if ts.min_margin <= 0.0 or ts.cycle_life < spec.required_cycles:
+            if dp_budget < 2.0 * spec.dp_budget:
+                dp_budget *= 1.5
+                P_inlet = max(P_inlet, feed_pressure(dp_budget))
+                log("F. structure/life", "REPAIR: raise dp budget",
+                    f"wall margin/life short (margin "
+                    f"{ts.min_margin*100:.0f}%, life {ts.cycle_life:.0f} "
+                    f"cycles); raising the jacket budget to "
+                    f"{dp_budget/1e5:.0f} bar to run the wall cooler")
+                last_error = "structural margin"
+                continue
+            raise DesignError(
+                "hot-wall structural margin/life cannot be met even at a "
+                "doubled dp budget - lower Pc or use a higher-strength "
+                "liner", ledger, trace)
 
         # ============ G. combustion-stability screen ======================
         stab = stability_screen(gas, contour, inj.stiffness_ox)
@@ -1204,12 +1221,15 @@ def _design_aerospike(spec: EngineSpec, n_random: int, n_polish: int,
             mawp=P_inlet, coolant_name=coolant.name,
             material=spec.closeout_material)
         ox_in_state = oxidizer.state_TP(T_ox_in, P_ox_inlet)
+        # the LOX circuit carries the full (dense) oxidizer flow: allow
+        # more feeder lines so each stays inside the tube catalog
         man_spike = design_manifolds(
             chamber.inner, spike_cd.channels, mdot_ox, spike_cd.dp,
             rho_in=ox_in_state.rho, mu_in=ox_in_state.mu,
             rho_out=ox_out.rho, mu_out=ox_out.mu,
             mawp=P_ox_inlet, coolant_name=oxidizer.name,
-            material=spec.closeout_material)
+            material=spec.closeout_material, max_feeders=6,
+            external_outlet=False)
         for tag, m in (("cowl", man), ("spike", man_spike)):
             log("D. manifolds", f"{tag} torus headers",
                 f"inlet duct {m.inlet.duct_diameter*1e3:.1f} mm "
@@ -1254,6 +1274,26 @@ def _design_aerospike(spec: EngineSpec, n_random: int, n_polish: int,
                            f"{t.cycle_life:.0f} cycles",
                            f">= {spec.required_cycles} required"),
             ]
+        # ---- repair: a cooler wall derates the yield less and strains
+        # less per cycle; buy wall margin with coolant velocity
+        weak = [tag for tag, t in (("cowl", ts), ("spike", ts_spike))
+                if t.min_margin <= 0.0
+                or t.cycle_life < spec.required_cycles]
+        if weak:
+            if dp_budget < 2.0 * spec.dp_budget:
+                dp_budget *= 1.5
+                P_inlet = max(P_inlet, feed_pressure(dp_budget))
+                P_ox_inlet = max(P_ox_inlet, feed_pressure(dp_budget))
+                log("F. structure/life", "REPAIR: raise dp budget",
+                    f"{'/'.join(weak)} wall margin/life short; raising the "
+                    f"jacket budget to {dp_budget/1e5:.0f} bar to run the "
+                    "wall cooler")
+                last_error = "structural margin"
+                continue
+            raise DesignError(
+                f"hot-wall structural margin/life cannot be met on: "
+                f"{weak} even at a doubled dp budget - lower Pc or use a "
+                "higher-strength liner", ledger, trace)
 
         # ============ G. combustion-stability screen ======================
         L_gas = chamber.L_chamber + chamber.L_convergent

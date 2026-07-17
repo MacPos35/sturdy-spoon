@@ -252,6 +252,24 @@ def run_benchmarks(full: bool = False) -> list[BenchmarkRow]:
                        "first-tangential mode: root of J'_1 (SP-194)",
                        kind="exact", tol=1e-3))
 
+    # ------------------------------------------------- aerospike (Angelino)
+    from .aerospike import design_spike_contour, truncation_cf_loss
+    sp = design_spike_contour(1.22, 3.5, A_t=1e-3, length_fraction=1.0)
+    rows.append(_point("aerospike", "ideal spike tip closure r_tip/R_lip",
+                       1.0 + sp.r[-1] / sp.R_lip, 1.0, "-",
+                       "Angelino 1964: the ideal spike closes on the axis "
+                       "at pi R_lip^2 = eps A_t", kind="exact", tol=1e-4))
+    from .engine_design import _thrust_coefficient
+    from .combustion import CombustionGas
+    gas_as = CombustionGas(T_c=3400.0, gamma=1.22, molar_mass=22e-3)
+    Cf_id, _ = _thrust_coefficient(gas_as, 20e5, 3.5, 101325.0)
+    loss_pct = truncation_cf_loss(1.22, 3.5, 101325.0 / 20e5, 0.3) \
+        / Cf_id * 100.0
+    rows.append(_band("aerospike", "30%-spike truncation loss (SL)",
+                      loss_pct, 0.5, 3.0, "% of Cf",
+                      "truncated-plug class loss, closed wake "
+                      "(Hagemann et al., JPP 14(5), 1998)"))
+
     from .combustion_equilibrium import equilibrium_combustion
     of_soot = next(o for o in np.arange(1.0, 2.0, 0.05)
                    if not equilibrium_combustion("ch4", o, 20e5).soot_predicted)

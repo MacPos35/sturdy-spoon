@@ -1,0 +1,28 @@
+# TKL-5-class kerolox thruster — the LEAP 71 reference point.
+#
+# LEAP 71's Noyron-designed TKL-5 (hot-fired June 2024 at Airborne
+# Engineering, Westcott, UK): 5 kN, LOX/kerosene, CuCrZr, printed as a
+# single piece, fired at O/F 1.8 and then a 12 s steady burn at the
+# nominal 2.3. Chamber pressure and Isp were not published; this spec
+# reproduces the published requirements at a pressure-fed-class
+# operating point. See docs/results/leap71_parity.md for the comparison.
+#
+#   cryosim design examples/engine_5kn_kerolox_tkl5.yaml -o output/tkl5
+
+name: tkl5-class-5kN-kerolox
+thrust: 5.0e3                 # N, sea level — TKL-5's published class
+propellants: lox/rp1          # RP-1 as the CEA CH1.9423 surrogate
+of_ratio: 2.3                 # TKL-5 nominal mixture ratio
+chamber_pressure: 2.0e6       # Pa (20 bar) — unpublished; class-typical
+ambient_pressure: 101325.0
+
+liner: cucrzr                 # the alloy TKL-5 was printed in
+closeout_material: 316L
+process: lpbf
+nozzle_type: bell
+
+# kerolox thermal quality: the film ring is credited thermally so the
+# coolant-side wall respects kerosene's ~590 K coking limit (SP-8087);
+# Bartz is left uncalibrated (factor 1.0) — fully conservative.
+film_fraction: 0.15
+credit_film: true

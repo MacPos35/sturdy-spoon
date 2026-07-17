@@ -124,10 +124,14 @@ class ManifoldSystemDesign:
             f"  inlet feeder line : {self.feeder_line.od_in:.3g}\" x "
             f"{self.feeder_line.wall_in:.3f}\" per feeder"
         )
-        lines.append(
-            f"  outlet line       : {self.outlet_line.od_in:.3g}\" x "
-            f"{self.outlet_line.wall_in:.3f}\""
-        )
+        if self.outlet_line is not None:
+            lines.append(
+                f"  outlet line       : {self.outlet_line.od_in:.3g}\" x "
+                f"{self.outlet_line.wall_in:.3f}\""
+            )
+        else:
+            lines.append("  outlet line       : internal discharge "
+                         "(no external tube)")
         lines.append("  NOTE: smooth-shell sizing only; bosses, welds and "
                      "channel cutouts need their own stress analysis.")
         return "\n".join(lines)
@@ -302,13 +306,16 @@ def design_manifolds(
     target: float = 0.03,
     material: str = "316L",
     max_feeders: int = 2,
+    external_outlet: bool = True,
 ) -> ManifoldSystemDesign:
     """Design both jacket manifolds for a channel-flow uniformity target.
 
     ``dp_channel``: pressure drop of the channel bank alone (use the regen
     solve's dP_total); ``rho/mu_in``: coolant at the jacket inlet (cold),
     ``rho/mu_out``: at the outlet (hot) — the hot, low-density collector is
-    usually the harder problem.
+    usually the harder problem. ``external_outlet=False`` skips sizing the
+    collected outlet tube (circuits that discharge internally, e.g. an
+    aerospike spike feeding the injector through face ports).
     """
     N = channels.n_channels
     theta = 2 * np.pi * (np.arange(N) + 0.5) / N
@@ -345,11 +352,13 @@ def design_manifolds(
     # the heated outlet stream is usually gas-like (supercritical, low
     # density): size it with a gas velocity target, not a liquid one
     outlet_service = "pressurant_gas" if rho_out < 200.0 else "pump_discharge"
-    outlet_line = size_line(
-        "jacket outlet line", outlet_service, coolant_name,
-        mdot_coolant, rho_out, mawp, mu=mu_out, material=material,
-        cryogenic=cryogenic,
-    )
+    outlet_line = None
+    if external_outlet:
+        outlet_line = size_line(
+            "jacket outlet line", outlet_service, coolant_name,
+            mdot_coolant, rho_out, mawp, mu=mu_out, material=material,
+            cryogenic=cryogenic,
+        )
 
     return ManifoldSystemDesign(
         inlet=inlet, outlet=outlet, clocking_deg=float(np.degrees(clk)),
